@@ -649,6 +649,57 @@ do {
     close(i[1].workSeconds, 2 * 3600, "timeline DST repeated hour merges")
 }
 
+// 32. Reminder scenes (task 6).
+do {
+    struct Seeded: RandomNumberGenerator {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state &+= 0x9E3779B97F4A7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            return z ^ (z >> 31)
+        }
+    }
+
+    equal(ReminderSceneCatalog.all.count, 6, "scene catalog has six entries")
+    equal(Set(ReminderSceneCatalog.all.map(\.id)).count, 6, "scene ids are unique")
+    equal(SceneID.allCases.count, 6, "scene id cases")
+
+    var generator = Seeded(state: 42)
+    var picker = ReminderScenePicker()
+    var picks: [SceneID] = []
+    for _ in 0..<50 { picks.append(picker.next(using: &generator).id) }
+    var noRepeat = true
+    for index in 1..<picks.count where picks[index] == picks[index - 1] { noRepeat = false }
+    check(noRepeat, "scene picker never repeats back to back")
+
+    var generatorA = Seeded(state: 7)
+    var pickerA = ReminderScenePicker()
+    let runA = (0..<12).map { _ in pickerA.next(using: &generatorA).id.rawValue }
+    var generatorB = Seeded(state: 7)
+    var pickerB = ReminderScenePicker()
+    let runB = (0..<12).map { _ in pickerB.next(using: &generatorB).id.rawValue }
+    equal(runA, runB, "scene picker is deterministic for a fixed seed")
+
+    var generatorC = Seeded(state: 99)
+    var pickerC = ReminderScenePicker(lastID: .walk)
+    check(pickerC.next(using: &generatorC).id != .walk, "scene picker avoids the previous scene")
+
+    check(SceneSymbolResolver.resolvedSymbol(for: ReminderSceneCatalog.scene(for: .restroom), isAvailable: { _ in false }) == "figure.walk", "scene symbol falls back when missing")
+    check(SceneSymbolResolver.resolvedSymbol(for: ReminderSceneCatalog.scene(for: .restroom), isAvailable: { _ in true }) == "toilet.fill", "scene symbol keeps the real name when available")
+
+    let banned = ["已起身", "已休息", "你完成了", "你已"]
+    var copyClean = true
+    for scene in ReminderSceneCatalog.all {
+        for word in banned where scene.title.contains(word) || scene.detail.contains(word) { copyClean = false }
+    }
+    check(copyClean, "scene copy never claims a completed action")
+
+    check(ReminderSceneCatalog.fallback.id == .walk, "scene fallback is walk")
+    check(ReminderSceneCatalog.scene(for: .breathe).title == "慢慢呼吸三次", "scene lookup by id")
+}
+
 if failures == 0 {
     print("SELFTEST PASSED (\(checks) checks)")
     exit(0)
