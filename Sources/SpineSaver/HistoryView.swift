@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 import SpineSaverCore
 
 enum HistoryRange: String, CaseIterable, Identifiable {
+    case today
     case daily
     case weekly
 
@@ -13,6 +14,7 @@ enum HistoryRange: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .today: return "今日"
         case .daily: return "按日"
         case .weekly: return "按周"
         }
@@ -27,27 +29,61 @@ enum HistoryExportKind {
 @MainActor
 final class HistoryViewModel: ObservableObject {
     @Published var events: [HistoryEvent] = []
-    @Published var range: HistoryRange = .daily
+    @Published var range: HistoryRange = .today
     @Published var errorMessage: String?
     @Published var showDeleteConfirmation = false
 
     let store: HistoryStore
-    private let calendar: Calendar
+    let calendar: Calendar
 
     init(store: HistoryStore, calendar: Calendar = .current) {
         self.store = store
         self.calendar = calendar
     }
 
+    var todayStart: Date {
+        calendar.startOfDay(for: Date())
+    }
+
+    var dailyBuckets: [HistoryBucket] {
+        let end = todayStart
+        let start = calendar.date(byAdding: .day, value: -13, to: end) ?? end
+        return HistoryAggregator.daily(events: events, from: start, to: end, calendar: calendar)
+    }
+
+    var weeklyBuckets: [HistoryBucket] {
+        var iso = calendar
+        iso.firstWeekday = 2
+        iso.minimumDaysInFirstWeek = 4
+        let end = todayStart
+        let currentWeekStart = iso.dateInterval(of: .weekOfYear, for: end)?.start
+            ?? iso.startOfDay(for: end)
+        let start = iso.date(byAdding: .weekOfYear, value: -7, to: currentWeekStart) ?? currentWeekStart
+        return HistoryAggregator.weekly(events: events, from: start, to: end, calendar: iso)
+    }
+
     var buckets: [HistoryBucket] {
-        let end = calendar.startOfDay(for: Date())
-        let start = calendar.date(byAdding: .day, value: -6, to: end) ?? end
         switch range {
-        case .daily:
-            return HistoryAggregator.daily(events: events, from: start, to: end, calendar: calendar)
-        case .weekly:
-            return HistoryAggregator.weekly(events: events, from: start, to: end, calendar: calendar)
+        case .today: return []
+        case .daily: return dailyBuckets
+        case .weekly: return weeklyBuckets
         }
+    }
+
+    var detailBuckets: [HistoryBucket] {
+        switch range {
+        case .today: return []
+        case .daily: return Array(dailyBuckets.suffix(7))
+        case .weekly: return Array(weeklyBuckets.suffix(4))
+        }
+    }
+
+    var xComponent: Calendar.Component {
+        range == .weekly ? .weekOfYear : .day
+    }
+
+    var xStride: Int {
+        range == .weekly ? 2 : 2
     }
 
     var rangeText: String {
@@ -55,7 +91,28 @@ final class HistoryViewModel: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
-        return "\(formatter.string(from: range.lowerBound)) – \(formatter.string(from: range.upperBound))"
+        return "\(formatter.string(from: range.lowerBound)) - \(formatter.string(from: range.upperBound))"
+    }
+
+    func dayLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        let weekday = ["日", "一", "二", "三", "四", "五", "六"][max(0, min(6, calendar.component(.weekday, from: date) - 1))]
+        return "\(formatter.string(from: date)) 周\(weekday)"
+    }
+
+    func weekLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "M/d"
+        return "\(formatter.string(from: date)) 起"
+    }
+
+    func label(for bucket: HistoryBucket) -> String {
+        range == .weekly ? weekLabel(bucket.startDate) : dayLabel(bucket.startDate)
+    }
+
+    func restCount(for bucket: HistoryBucket) -> Int {
+        bucket.restAutoCompletedCount + bucket.restFinishedEarlyCount
     }
 
     func reload() {
@@ -119,22 +176,15 @@ struct HistoryView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 180)
+                .frame(width: 240)
             }
 
             if model.events.isEmpty {
                 Text("暂无记录。完成一次计时或休息后，这里会出现本机记录。")
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .frame(maxWidth: .infinity, minHeight: 320)
             } else {
-                Chart(model.buckets) { bucket in
-                    BarMark(
-                        x: .value("日期", bucket.startDate, unit: model.range == .daily ? .day : .weekOfYear),
-                        y: .value("分钟", bucket.screenSeconds / 60)
-                    )
-                    .foregroundStyle(.tint)
-                }
-                .frame(height: 220)
+                content
             }
 
             HStack(spacing: 16) {
@@ -163,7 +213,7 @@ struct HistoryView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 720, minHeight: 520)
+        .frame(minWidth: 840, minHeight: 620)
         .onAppear(perform: model.reload)
         .alert("删除全部历史？", isPresented: $model.showDeleteConfirmation) {
             Button("取消", role: .cancel) {}
@@ -172,6 +222,134 @@ struct HistoryView: View {
             }
         } message: {
             Text("这会删除本机全部使用习惯记录，无法撤销。设置和本轮进度不会被删除。")
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.range {
+        case .today:
+            ScrollView {
+                TodayTimelineView(events: model.events, day: Date(), calendar: model.calendar)
+                    .padding(.vertical, 4)
+            }
+        case .daily, .weekly:
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    chartSection(
+                        title: "计时时长",
+                        subtitle: model.range == .weekly ? "最近 8 个自然周" : "最近 14 天"
+                    ) {
+                        durationChart
+                    }
+                    chartSection(title: "休息完成次数", subtitle: "每根柱是一次完成的休息") {
+                        restChart
+                    }
+                    detailList
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func chartSection<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.headline)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            content()
+        }
+    }
+
+    private var durationChart: some View {
+        Chart(model.buckets) { bucket in
+            BarMark(
+                x: .value("日期", bucket.startDate, unit: model.xComponent),
+                y: .value("分钟", bucket.screenSeconds / 60)
+            )
+            .foregroundStyle(Color.accentColor)
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: model.xComponent, count: model.xStride)) { value in
+                AxisGridLine()
+                AxisTick()
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(model.label(for: HistoryBucket(startDate: date)))
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let minutes = value.as(Double.self) {
+                        Text(DurationText.axis(seconds: minutes * 60))
+                    }
+                }
+            }
+        }
+        .chartYAxisLabel("分钟")
+        .frame(height: 180)
+    }
+
+    private var restChart: some View {
+        Chart(model.buckets) { bucket in
+            BarMark(
+                x: .value("日期", bucket.startDate, unit: model.xComponent),
+                y: .value("次", model.restCount(for: bucket))
+            )
+            .foregroundStyle(Color.green)
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: model.xComponent, count: model.xStride)) { value in
+                AxisGridLine()
+                AxisTick()
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(model.label(for: HistoryBucket(startDate: date)))
+                    }
+                }
+            }
+        }
+        .chartYAxisLabel("次")
+        .frame(height: 150)
+    }
+
+    private var detailList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("明细")
+                .font(.headline)
+            HStack {
+                Text("日期").frame(width: 130, alignment: .leading)
+                Text("计时").frame(width: 120, alignment: .leading)
+                Text("休息")
+                Spacer()
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            ForEach(model.detailBuckets) { bucket in
+                HStack {
+                    Text(model.label(for: bucket))
+                        .frame(width: 130, alignment: .leading)
+                    Text(DurationText.compact(seconds: bucket.screenSeconds))
+                        .frame(width: 120, alignment: .leading)
+                        .monospacedDigit()
+                    Text("\(model.restCount(for: bucket)) 次")
+                        .monospacedDigit()
+                    Spacer()
+                }
+                .font(.caption)
+            }
         }
     }
 }
