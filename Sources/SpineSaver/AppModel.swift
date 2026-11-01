@@ -240,7 +240,7 @@ final class AppModel: ObservableObject {
     }
 
     func showReminderForQA() {
-        presenter.show()
+        presenter.show(scene: ReminderSceneCatalog.fallback)
     }
 
     func startRest() {
@@ -567,7 +567,7 @@ final class AppModel: ObservableObject {
         record(.reminderPresented, at: time.reading().date)
         switch settings.reminderStyle {
         case .miniPanel:
-            presenter.show()
+            presenter.show(scene: ReminderSceneCatalog.fallback)
         case .systemNotification:
             let sessionID = self.sessionID
             let generation = self.cycle.generation

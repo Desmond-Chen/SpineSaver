@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SpineSaverCore
 
 @MainActor
 final class ReminderPresenter {
@@ -19,15 +20,15 @@ final class ReminderPresenter {
     var onResumeLater: ((ResumePromptToken) -> Void)?
 
     private enum ContentKind: Equatable {
-        case workReminder
+        case workReminder(ReminderScene)
         case resume(ResumePromptToken)
     }
 
     private var panel: NSPanel?
     private var displayedContent: ContentKind?
 
-    func show() {
-        present(.workReminder)
+    func show(scene: ReminderScene) {
+        present(.workReminder(scene))
     }
 
     /// Presents the resume panel bound to `token`. Replaces any work reminder
@@ -85,8 +86,9 @@ final class ReminderPresenter {
 
     private func makeContentView(for content: ContentKind) -> NSView? {
         switch content {
-        case .workReminder:
+        case .workReminder(let scene):
             let view = ReminderView(
+                scene: scene,
                 onRest: { [weak self] in self?.onStartRest?() },
                 onSnooze: { [weak self] in self?.onSnooze?() },
                 onClose: { [weak self] in self?.dismiss() }
@@ -116,27 +118,32 @@ final class ReminderPresenter {
 }
 
 struct ReminderView: View {
+    let scene: ReminderScene
     let onRest: () -> Void
     let onSnooze: () -> Void
     let onClose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 14) {
-                Image(systemName: "figure.walk")
-                    .font(.largeTitle)
-                    .foregroundStyle(.tint)
-                Text("起来走一走")
-                    .font(.largeTitle.bold())
+            HStack(alignment: .top, spacing: 26) {
+                illustration
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(scene.title)
+                        .font(.system(size: 34, weight: .bold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(scene.detail)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("建议离开屏幕休息一会儿")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.quaternary.opacity(0.5), in: Capsule())
+                }
+                Spacer(minLength: 0)
             }
-
-            Text("也可以喝点水，按需去洗手间。")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-
-            Text("建议离开屏幕休息一会儿")
-                .font(.body)
-                .foregroundStyle(.secondary)
 
             Spacer(minLength: 0)
 
@@ -161,7 +168,32 @@ struct ReminderView: View {
                 .strokeBorder(.white.opacity(0.18), lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("SpineSaver 起身提醒")
+        .accessibilityLabel(scene.accessibilityLabel)
+    }
+
+    private var illustration: some View {
+        let symbol = SceneSymbolResolver.resolvedSymbol(
+            for: scene,
+            isAvailable: { NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil }
+        )
+        return ZStack {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.accentColor.opacity(0.30), Color.accentColor.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.18), lineWidth: 1)
+            Image(systemName: symbol)
+                .font(.system(size: 66, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tint)
+        }
+        .frame(width: 150, height: 150)
+        .accessibilityHidden(true)
     }
 }
 
