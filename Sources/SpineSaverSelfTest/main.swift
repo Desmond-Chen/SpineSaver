@@ -560,6 +560,19 @@ do {
     close(cycle.restDuration, 2 * 60, "rest duration frozen after auto complete")
 }
 
+// 30. Duration text units (task 4).
+do {
+    equal(DurationText.compact(seconds: 0), "0 分", "duration zero")
+    equal(DurationText.compact(seconds: 59), "1 分", "duration rounds a partial minute")
+    equal(DurationText.compact(seconds: 60), "1 分", "duration one minute")
+    equal(DurationText.compact(seconds: 2700), "45 分", "duration 45 minutes")
+    equal(DurationText.compact(seconds: 3600), "1 小时", "duration whole hour")
+    equal(DurationText.compact(seconds: 4800), "1 小时 20 分", "duration hour and minutes")
+    equal(DurationText.compact(seconds: -5), "0 分", "duration clamps negative")
+    equal(DurationText.axis(seconds: 4800), "80 分", "duration axis keeps minutes")
+    equal(DurationText.axis(seconds: 0), "0 分", "duration axis zero")
+}
+
 if failures == 0 {
     print("SELFTEST PASSED (\(checks) checks)")
     exit(0)
