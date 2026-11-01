@@ -73,6 +73,16 @@ struct TodayTimelineView: View {
                     )
                     .foregroundStyle(color(for: .reminder))
                     .symbolSize(40)
+                } else if isShortRest(segment) {
+                    // A 2 minute rest is under two pixels on a 24 hour axis; mark it
+                    // instead of drawing a bar nobody can see. The position is the
+                    // midpoint, so it never claims a duration it did not have.
+                    PointMark(
+                        x: .value("时间", segment.start.addingTimeInterval(segment.duration / 2)),
+                        y: .value("类型", laneTitle(segment.kind))
+                    )
+                    .foregroundStyle(color(for: segment.kind))
+                    .symbolSize(70)
                 } else {
                     RectangleMark(
                         xStart: .value("开始", segment.start),
@@ -143,6 +153,10 @@ struct TodayTimelineView: View {
         let end = calendar.date(byAdding: .day, value: 1, to: start)
             ?? start.addingTimeInterval(24 * 3600)
         return (start, end)
+    }
+
+    private func isShortRest(_ segment: TimelineSegment) -> Bool {
+        (segment.kind == .rest || segment.kind == .restCancelled) && segment.duration < 10 * 60
     }
 
     private func laneTitle(_ kind: TimelineKind) -> String {

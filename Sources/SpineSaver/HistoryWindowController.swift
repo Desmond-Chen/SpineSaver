@@ -7,7 +7,10 @@ final class HistoryWindowController {
     private var window: NSWindow?
 
     init(model: AppModel) {
-        self.viewModel = HistoryViewModel(store: model.historyStore)
+        self.viewModel = HistoryViewModel(
+            store: model.historyStore,
+            initialRange: QAEnvironment.historyRange ?? .today
+        )
     }
 
     func show() {

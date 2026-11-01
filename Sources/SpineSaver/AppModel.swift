@@ -706,6 +706,10 @@ enum QAEnvironment {
     static var openSettings: Bool { env["SPINESAVER_QA_OPEN_SETTINGS"] == "1" }
     static var openHistory: Bool { env["SPINESAVER_QA_OPEN_HISTORY"] == "1" }
     static var showReminder: Bool { env["SPINESAVER_QA_SHOW_REMINDER"] == "1" }
+    static var historyRange: HistoryRange? {
+        guard let raw = env["SPINESAVER_QA_HISTORY_RANGE"] else { return nil }
+        return HistoryRange(rawValue: raw)
+    }
     static var reminderScene: SceneID? {
         guard let raw = env["SPINESAVER_QA_REMINDER_SCENE"] else { return nil }
         return SceneID(rawValue: raw) ?? .walk

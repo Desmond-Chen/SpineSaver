@@ -90,7 +90,7 @@ struct SettingsView: View {
                     Button("打开历史…") {
                         onOpenHistory?()
                     }
-                    Text("查看按日/周图表、导出 CSV/JSON、删除历史。")
+                    Text("查看今日/按日/按周图表、导出 CSV/JSON、删除历史。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if let warning = model.historyWarning {

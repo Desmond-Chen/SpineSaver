@@ -36,9 +36,10 @@ final class HistoryViewModel: ObservableObject {
     let store: HistoryStore
     let calendar: Calendar
 
-    init(store: HistoryStore, calendar: Calendar = .current) {
+    init(store: HistoryStore, calendar: Calendar = .current, initialRange: HistoryRange = .today) {
         self.store = store
         self.calendar = calendar
+        self.range = initialRange
     }
 
     var todayStart: Date {
