@@ -83,7 +83,7 @@ final class HistoryViewModel: ObservableObject {
     }
 
     var xStride: Int {
-        range == .weekly ? 2 : 2
+        2
     }
 
     var rangeText: String {
@@ -107,8 +107,8 @@ final class HistoryViewModel: ObservableObject {
         return "\(formatter.string(from: date)) 起"
     }
 
-    func label(for bucket: HistoryBucket) -> String {
-        range == .weekly ? weekLabel(bucket.startDate) : dayLabel(bucket.startDate)
+    func label(for date: Date) -> String {
+        range == .weekly ? weekLabel(date) : dayLabel(date)
     }
 
     func restCount(for bucket: HistoryBucket) -> Int {
@@ -283,7 +283,7 @@ struct HistoryView: View {
                 AxisTick()
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
-                        Text(model.label(for: HistoryBucket(startDate: date)))
+                        Text(model.label(for: date))
                     }
                 }
             }
@@ -316,7 +316,7 @@ struct HistoryView: View {
                 AxisTick()
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
-                        Text(model.label(for: HistoryBucket(startDate: date)))
+                        Text(model.label(for: date))
                     }
                 }
             }
@@ -339,7 +339,7 @@ struct HistoryView: View {
             .foregroundStyle(.secondary)
             ForEach(model.detailBuckets) { bucket in
                 HStack {
-                    Text(model.label(for: bucket))
+                    Text(model.label(for: bucket.startDate))
                         .frame(width: 130, alignment: .leading)
                     Text(DurationText.compact(seconds: bucket.screenSeconds))
                         .frame(width: 120, alignment: .leading)
