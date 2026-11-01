@@ -48,6 +48,18 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    Toggle(
+                        "随机提醒画面",
+                        isOn: Binding(
+                            get: { model.settings.randomReminderScenes },
+                            set: { model.setRandomReminderScenes($0) }
+                        )
+                    )
+
+                    Text("开启后每轮从 6 个场景里随机取一个，相邻两次不重复；关闭后固定显示“起来走一走”。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
                     Text("休息结束待开始时，菜单栏仍有“开始新一轮”入口。")
                         .font(.caption)
                         .foregroundStyle(.secondary)

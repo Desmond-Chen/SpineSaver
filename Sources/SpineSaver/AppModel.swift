@@ -328,6 +328,12 @@ final class AppModel: ObservableObject {
         tick()
     }
 
+    func setRandomReminderScenes(_ enabled: Bool) {
+        guard enabled != settings.randomReminderScenes else { return }
+        settings.randomReminderScenes = enabled
+        store.saveSettings(settings)
+    }
+
     func setReminderStyle(_ style: ReminderStyle) {
         guard style != settings.reminderStyle else { return }
         settings.reminderStyle = style

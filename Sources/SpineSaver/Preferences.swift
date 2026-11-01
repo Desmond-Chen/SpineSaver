@@ -29,6 +29,7 @@ struct AppSettings: Equatable {
     var restMinutes: Int = 2
     var reminderStyle: ReminderStyle = .miniPanel
     var launchAtLogin: Bool = false
+    var randomReminderScenes: Bool = true
 
     var cycleConfiguration: BreakCycleConfiguration {
         var config = BreakCycleConfiguration.standard
@@ -46,6 +47,8 @@ protocol PreferencesStoring: AnyObject {
     func loadRestSnapshot() -> RestSnapshot?
     func saveRestSnapshot(_ snapshot: RestSnapshot)
     func clearRestSnapshot()
+    func loadLastReminderSceneID() -> SceneID?
+    func saveLastReminderSceneID(_ id: SceneID?)
 }
 
 final class PreferencesStore: PreferencesStoring {
@@ -54,6 +57,8 @@ final class PreferencesStore: PreferencesStoring {
         static let restMinutes = "spinesaver.restMinutes"
         static let reminderStyle = "spinesaver.reminderStyle"
         static let launchAtLogin = "spinesaver.launchAtLogin"
+        static let randomReminderScenes = "spinesaver.randomReminderScenes"
+        static let lastReminderSceneID = "spinesaver.lastReminderSceneID"
         static let usedSeconds = "spinesaver.usedSeconds"
         static let hasUsage = "spinesaver.hasUsage"
         static let restSnapshot = "spinesaver.restSnapshot"
@@ -80,6 +85,10 @@ final class PreferencesStore: PreferencesStoring {
             settings.reminderStyle = style
         }
         settings.launchAtLogin = defaults.bool(forKey: Key.launchAtLogin)
+        // Only an explicit false turns random scenes off; a fresh install keeps them on.
+        if defaults.object(forKey: Key.randomReminderScenes) != nil {
+            settings.randomReminderScenes = defaults.bool(forKey: Key.randomReminderScenes)
+        }
         return settings
     }
 
@@ -88,6 +97,7 @@ final class PreferencesStore: PreferencesStoring {
         defaults.set(settings.restMinutes, forKey: Key.restMinutes)
         defaults.set(settings.reminderStyle.rawValue, forKey: Key.reminderStyle)
         defaults.set(settings.launchAtLogin, forKey: Key.launchAtLogin)
+        defaults.set(settings.randomReminderScenes, forKey: Key.randomReminderScenes)
     }
 
     func loadUsage() -> TimeInterval? {
@@ -112,5 +122,18 @@ final class PreferencesStore: PreferencesStoring {
 
     func clearRestSnapshot() {
         defaults.removeObject(forKey: Key.restSnapshot)
+    }
+
+    func loadLastReminderSceneID() -> SceneID? {
+        guard let raw = defaults.string(forKey: Key.lastReminderSceneID) else { return nil }
+        return SceneID(rawValue: raw)
+    }
+
+    func saveLastReminderSceneID(_ id: SceneID?) {
+        if let id {
+            defaults.set(id.rawValue, forKey: Key.lastReminderSceneID)
+        } else {
+            defaults.removeObject(forKey: Key.lastReminderSceneID)
+        }
     }
 }
