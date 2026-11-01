@@ -6,3 +6,6 @@ DerivedData/
 .DS_Store
 *.xcuserstate
 .omo/
+
+# 本地产品文档，不公开
+SpineSaver-*.md
