@@ -186,7 +186,9 @@ public enum DailyTimeline {
                 break
             }
         }
-        for segment in segments(events: events, day: day, referenceDate: window.end, calendar: calendar) {
+        // Only finished rests feed the summary: a rest still running has no terminal
+        // event, so its planned duration must never be counted as time taken.
+        for segment in segments(events: events, day: day, referenceDate: window.start, calendar: calendar) {
             switch segment.kind {
             case .work:
                 result.workSeconds += segment.duration

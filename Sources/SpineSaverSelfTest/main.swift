@@ -640,6 +640,11 @@ do {
     let hSummary = DailyTimeline.summary(events: [], day: day, calendar: utc)
     check(hSummary.workSeconds == 0 && hSummary.restSeconds == 0 && hSummary.reminderCount == 0, "timeline empty summary")
 
+    let runningRestOnly = [HistoryEvent(occurredAt: utcDate(2026, 11, 1, 17, 0), timeZoneIdentifier: "UTC", kind: .restStarted, restSeconds: 600)]
+    let runningSummary = DailyTimeline.summary(events: runningRestOnly, day: day, calendar: utc)
+    close(runningSummary.restSeconds, 0, "timeline summary ignores a rest still running")
+    equal(runningSummary.restCount, 0, "timeline summary does not count a running rest")
+
     var la = Calendar(identifier: .gregorian)
     la.timeZone = TimeZone(identifier: "America/Los_Angeles")!
     let laDay = la.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 0))!
