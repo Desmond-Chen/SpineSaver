@@ -573,6 +573,82 @@ do {
     equal(DurationText.axis(seconds: 0), "0 分", "duration axis zero")
 }
 
+// 31. Daily timeline rebuild (task 5).
+do {
+    var utc = Calendar(identifier: .gregorian)
+    utc.timeZone = TimeZone(identifier: "UTC")!
+    func utcDate(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 0, _ mi: Int = 0) -> Date {
+        utc.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi))!
+    }
+    let day = utcDate(2026, 11, 1)
+    let midnight = utcDate(2026, 11, 1, 0, 0)
+    let reference = utcDate(2026, 11, 1, 23, 59)
+
+    let crossMidnight = HistoryEvent(occurredAt: utcDate(2026, 10, 31, 23, 59), timeZoneIdentifier: "UTC", kind: .screenTime, screenSeconds: 120)
+    let a = DailyTimeline.segments(events: [crossMidnight], day: day, referenceDate: reference, calendar: utc)
+    equal(a.count, 1, "timeline clips a cross-midnight slice")
+    close(a[0].start.timeIntervalSince(midnight), 0, "timeline clipped start is midnight")
+    close(a[0].duration, 60, "timeline clipped duration is one minute")
+
+    let contiguous = (0..<45).map { index in
+        HistoryEvent(occurredAt: utcDate(2026, 11, 1, 9, 0).addingTimeInterval(Double(index) * 60), timeZoneIdentifier: "UTC", kind: .screenTime, screenSeconds: 60)
+    }
+    let b = DailyTimeline.segments(events: contiguous, day: day, referenceDate: reference, calendar: utc)
+    equal(b.count, 1, "timeline merges contiguous slices")
+    close(b[0].duration, 45 * 60, "timeline merged duration")
+
+    let gapped = [
+        HistoryEvent(occurredAt: utcDate(2026, 11, 1, 9, 0), timeZoneIdentifier: "UTC", kind: .screenTime, screenSeconds: 60),
+        HistoryEvent(occurredAt: utcDate(2026, 11, 1, 9, 2), timeZoneIdentifier: "UTC", kind: .screenTime, screenSeconds: 60)
+    ]
+    equal(DailyTimeline.segments(events: gapped, day: day, referenceDate: reference, calendar: utc).count, 2, "timeline keeps a two-minute gap")
+
+    let completed = [
+        HistoryEvent(occurredAt: utcDate(2026, 11, 1, 10, 0), timeZoneIdentifier: "UTC", kind: .restStarted, restSeconds: 120),
+        HistoryEvent(occurredAt: utcDate(2026, 11, 1, 10, 2), timeZoneIdentifier: "UTC", kind: .restAutoCompleted, restSeconds: 120)
+    ]
+    let d = DailyTimeline.segments(events: completed, day: day, referenceDate: reference, calendar: utc)
+    equal(d.count, 1, "timeline does not double count a completed rest")
+    equal(d[0].kind, TimelineKind.rest, "timeline completed rest kind")
+    close(d[0].start.timeIntervalSince(utcDate(2026, 11, 1, 10, 0)), 0, "timeline rest start")
+    close(d[0].duration, 120, "timeline rest duration")
+
+    let inProgress = [HistoryEvent(occurredAt: utcDate(2026, 11, 1, 11, 0), timeZoneIdentifier: "UTC", kind: .restStarted, restSeconds: 600)]
+    let e = DailyTimeline.segments(events: inProgress, day: day, referenceDate: utcDate(2026, 11, 1, 11, 2), calendar: utc)
+    equal(e.count, 1, "timeline shows an in-progress rest")
+    close(e[0].duration, 120, "timeline in-progress rest stops at referenceDate")
+
+    let cancelled = [HistoryEvent(occurredAt: utcDate(2026, 11, 1, 12, 0), timeZoneIdentifier: "UTC", kind: .restCancelled, restSeconds: 60)]
+    let f = DailyTimeline.segments(events: cancelled, day: day, referenceDate: reference, calendar: utc)
+    equal(f.count, 1, "timeline cancelled rest segment")
+    equal(f[0].kind, TimelineKind.restCancelled, "timeline cancelled rest kind")
+    let fSummary = DailyTimeline.summary(events: cancelled, day: day, calendar: utc)
+    close(fSummary.restSeconds, 0, "timeline cancelled rest is not rest seconds")
+    equal(fSummary.cancelledRestCount, 1, "timeline cancelled rest count")
+    let fHourly = DailyTimeline.hourlyTotals(events: cancelled, day: day, referenceDate: reference, calendar: utc)
+    close(fHourly[11].cancelledRestSeconds, 60, "timeline hourly cancelled rest")
+
+    let oneHour = [HistoryEvent(occurredAt: utcDate(2026, 11, 1, 9, 30), timeZoneIdentifier: "UTC", kind: .screenTime, screenSeconds: 3600)]
+    let g = DailyTimeline.hourlyTotals(events: oneHour, day: day, referenceDate: reference, calendar: utc)
+    equal(g.count, 24, "timeline hourly has 24 buckets")
+    close(g[9].workSeconds, 1800, "timeline hourly first half")
+    close(g[10].workSeconds, 1800, "timeline hourly second half")
+
+    equal(DailyTimeline.segments(events: [], day: day, referenceDate: reference, calendar: utc).count, 0, "timeline empty segments")
+    let h = DailyTimeline.hourlyTotals(events: [], day: day, referenceDate: reference, calendar: utc)
+    check(h.count == 24 && h.allSatisfy { $0.workSeconds == 0 && $0.restSeconds == 0 }, "timeline empty hourly")
+    let hSummary = DailyTimeline.summary(events: [], day: day, calendar: utc)
+    check(hSummary.workSeconds == 0 && hSummary.restSeconds == 0 && hSummary.reminderCount == 0, "timeline empty summary")
+
+    var la = Calendar(identifier: .gregorian)
+    la.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+    let laDay = la.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 0))!
+    let dst = [HistoryEvent(occurredAt: laDay, timeZoneIdentifier: "America/Los_Angeles", kind: .screenTime, screenSeconds: 25 * 3600)]
+    let i = DailyTimeline.hourlyTotals(events: dst, day: laDay, referenceDate: laDay.addingTimeInterval(25 * 3600), calendar: la)
+    close(i.reduce(0) { $0 + $1.workSeconds }, 25 * 3600, "timeline DST total")
+    close(i[1].workSeconds, 2 * 3600, "timeline DST repeated hour merges")
+}
+
 if failures == 0 {
     print("SELFTEST PASSED (\(checks) checks)")
     exit(0)
