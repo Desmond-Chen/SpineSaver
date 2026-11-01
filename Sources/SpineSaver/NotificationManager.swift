@@ -77,10 +77,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, @un
     /// The token binds a notification action to the app session and cycle that
     /// produced it, so a notification left in Notification Center cannot mutate
     /// a later cycle after the user has already rested or the app relaunched.
-    func deliver(sessionID: String, generation: Int) {
+    func deliver(sessionID: String, generation: Int, body: String? = nil) {
         let content = UNMutableNotificationContent()
         content.title = "起来走一走"
-        content.body = "也可以喝点水，按需去洗手间。"
+        content.body = body ?? "也可以喝点水，按需去洗手间。"
         content.categoryIdentifier = Self.categoryIdentifier
         content.sound = .default
         content.userInfo = [

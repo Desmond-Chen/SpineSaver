@@ -7,6 +7,11 @@ public struct ReminderScenePicker {
         self.lastID = lastID
     }
 
+    /// Remember a scene shown outside the random path so the next pick still differs.
+    public mutating func remember(_ id: SceneID) {
+        lastID = id
+    }
+
     /// Uniform pick that never repeats the previous scene.
     public mutating func next<G: RandomNumberGenerator>(using generator: inout G) -> ReminderScene {
         let candidates = ReminderSceneCatalog.all.filter { $0.id != lastID }

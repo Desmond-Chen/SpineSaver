@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     let historyStore: HistoryStore
     private let activity: WorkspaceActivityMonitor
     private let notifications: NotificationManager
+    private var scenePicker: ReminderScenePicker
     private let presenter: ReminderPresenter
     private var timer: Timer?
     private var screenTimeLedger: ScreenTimeLedger
@@ -53,6 +54,7 @@ final class AppModel: ObservableObject {
         self.activity = activity
         self.notifications = notifications
         self.presenter = presenter
+        self.scenePicker = ReminderScenePicker(lastID: resolvedStore.loadLastReminderSceneID())
 
         let loaded = resolvedStore.loadSettings()
         self.settings = loaded
@@ -240,7 +242,7 @@ final class AppModel: ObservableObject {
     }
 
     func showReminderForQA() {
-        presenter.show(scene: ReminderSceneCatalog.fallback)
+        presenter.show(scene: nextReminderScene())
     }
 
     func startRest() {
@@ -569,11 +571,28 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func nextReminderScene() -> ReminderScene {
+        if let forced = QAEnvironment.reminderScene {
+            scenePicker.remember(forced)
+            return ReminderSceneCatalog.scene(for: forced)
+        }
+        guard settings.randomReminderScenes else {
+            scenePicker.remember(ReminderSceneCatalog.fallback.id)
+            store.saveLastReminderSceneID(ReminderSceneCatalog.fallback.id)
+            return ReminderSceneCatalog.fallback
+        }
+        var generator = SystemRandomNumberGenerator()
+        let scene = scenePicker.next(using: &generator)
+        store.saveLastReminderSceneID(scene.id)
+        return scene
+    }
+
     private func presentReminder() {
         record(.reminderPresented, at: time.reading().date)
+        let scene = nextReminderScene()
         switch settings.reminderStyle {
         case .miniPanel:
-            presenter.show(scene: ReminderSceneCatalog.fallback)
+            presenter.show(scene: scene)
         case .systemNotification:
             let sessionID = self.sessionID
             let generation = self.cycle.generation
@@ -586,14 +605,14 @@ final class AppModel: ObservableObject {
                       self.settings.reminderStyle == .systemNotification else { return }
                 switch status {
                 case .authorized, .provisional, .ephemeral:
-                    self.notifications.deliver(sessionID: sessionID, generation: generation)
+                    self.notifications.deliver(sessionID: sessionID, generation: generation, body: "\(scene.title)。\(scene.detail)")
                 case .notDetermined:
                     let granted = await self.notifications.requestAuthorization()
                     guard self.cycle.generation == generation, self.cycle.isDue,
                           self.activity.isAvailable,
                           self.settings.reminderStyle == .systemNotification else { return }
                     if granted {
-                        self.notifications.deliver(sessionID: sessionID, generation: generation)
+                        self.notifications.deliver(sessionID: sessionID, generation: generation, body: "\(scene.title)。\(scene.detail)")
                     } else {
                         self.reminderChannelWarning = "系统通知未授权。请在设置中开启，或切回迷你弹窗。"
                     }
@@ -687,6 +706,10 @@ enum QAEnvironment {
     static var openSettings: Bool { env["SPINESAVER_QA_OPEN_SETTINGS"] == "1" }
     static var openHistory: Bool { env["SPINESAVER_QA_OPEN_HISTORY"] == "1" }
     static var showReminder: Bool { env["SPINESAVER_QA_SHOW_REMINDER"] == "1" }
+    static var reminderScene: SceneID? {
+        guard let raw = env["SPINESAVER_QA_REMINDER_SCENE"] else { return nil }
+        return SceneID(rawValue: raw) ?? .walk
+    }
 
     private static func seconds(_ key: String) -> TimeInterval? {
         guard let raw = env[key], let value = TimeInterval(raw), value > 0 else { return nil }

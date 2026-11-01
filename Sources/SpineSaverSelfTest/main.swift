@@ -700,6 +700,17 @@ do {
     check(ReminderSceneCatalog.scene(for: .breathe).title == "慢慢呼吸三次", "scene lookup by id")
 }
 
+// 33. Reminder scene memory (task 11).
+do {
+    var picker = ReminderScenePicker()
+    picker.remember(.restroom)
+    equal(picker.lastID, SceneID.restroom, "scene picker remembers a forced scene")
+    var generator = SystemRandomNumberGenerator()
+    check(picker.next(using: &generator).id != .restroom, "scene picker skips a remembered scene")
+    picker.remember(.breathe)
+    equal(picker.lastID, SceneID.breathe, "scene picker remember replaces the previous id")
+}
+
 if failures == 0 {
     print("SELFTEST PASSED (\(checks) checks)")
     exit(0)
