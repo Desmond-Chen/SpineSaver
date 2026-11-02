@@ -56,6 +56,14 @@ final class HistoryViewModel: ObservableObject {
         lastLoadedAt != nil
     }
 
+    var displayState: HistoryDisplayState {
+        HistoryDisplayStateResolver.resolve(
+            hasSnapshot: hasSnapshot,
+            eventCount: events.count,
+            readErrorMessage: readErrorMessage
+        )
+    }
+
     var lastLoadedText: String? {
         guard let lastLoadedAt else { return nil }
         let formatter = DateFormatter()
@@ -232,15 +240,20 @@ struct HistoryView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let readError = model.readErrorMessage, !model.hasSnapshot {
-                Text("读取历史记录失败：\(readError)")
+            switch model.displayState {
+            case .readFailureNoSnapshot:
+                Text("读取历史记录失败：\(model.readErrorMessage ?? "")")
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, minHeight: 320)
-            } else if model.events.isEmpty {
+            case .staleEmpty:
+                Text("刷新失败，上次成功读取时没有记录：\(model.readErrorMessage ?? "")")
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, minHeight: 320)
+            case .empty:
                 Text("暂无记录。完成一次计时或休息后，这里会出现本机记录。")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 320)
-            } else {
+            case .content:
                 content
             }
 
@@ -275,7 +288,7 @@ struct HistoryView: View {
                 }
             }
 
-            if let readError = model.readErrorMessage, model.hasSnapshot {
+            if case .content = model.displayState, let readError = model.readErrorMessage {
                 Text("刷新失败，仍显示上次成功读取的数据：\(readError)")
                     .font(.caption)
                     .foregroundStyle(.red)

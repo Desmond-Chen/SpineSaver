@@ -307,11 +307,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Snoozes the due reminder. The default entry (menu bar) passes the
-    /// validated minutes for this action only; custom menu drafts, the panel
-    /// and notifications also pass the source token after the settle tick. Returns
-    /// whether the snooze was accepted; only an accepted snooze dismisses the
-    /// panel and records exactly one snoozed event.
+    /// Snoozes the due reminder. All entries pass the source token after the
+    /// settle tick: the menu bar (default button and custom draft), the panel,
+    /// and notifications. Returns whether the snooze was accepted; only an
+    /// accepted snooze dismisses the panel and records exactly one snoozed
+    /// event.
     @discardableResult
     func snooze(
         minutes: Int? = nil,

@@ -948,6 +948,33 @@ do {
     equal(ledger.flush(reading: reading), [], "repeated exit flush remains empty")
 }
 
+// 43. History display state (F2 B1): a read failure never renders as the normal empty state.
+do {
+    equal(HistoryDisplayStateResolver.resolve(hasSnapshot: false, eventCount: 0, readErrorMessage: nil),
+          .empty, "no snapshot yet and no failure is normal empty")
+    equal(HistoryDisplayStateResolver.resolve(hasSnapshot: true, eventCount: 0, readErrorMessage: nil),
+          .empty, "empty successful snapshot is normal empty")
+    equal(HistoryDisplayStateResolver.resolve(hasSnapshot: true, eventCount: 3, readErrorMessage: nil),
+          .content, "successful snapshot with events is content")
+    equal(HistoryDisplayStateResolver.resolve(hasSnapshot: false, eventCount: 0, readErrorMessage: "read error"),
+          .readFailureNoSnapshot, "first read failure without a snapshot")
+    equal(HistoryDisplayStateResolver.resolve(hasSnapshot: true, eventCount: 3, readErrorMessage: "read error"),
+          .content, "read failure over a non-empty snapshot keeps content")
+    equal(HistoryDisplayStateResolver.resolve(hasSnapshot: true, eventCount: 0, readErrorMessage: "read error"),
+          .staleEmpty, "read failure over an empty snapshot is stale-empty, not normal empty")
+    for hasSnapshot in [false, true] {
+        for eventCount in [0, 3] {
+            let state = HistoryDisplayStateResolver.resolve(
+                hasSnapshot: hasSnapshot,
+                eventCount: eventCount,
+                readErrorMessage: "read error"
+            )
+            check(state != .empty,
+                  "read failure never resolves to normal empty (hasSnapshot \(hasSnapshot), \(eventCount) events) — got \(state)")
+        }
+    }
+}
+
 if failures == 0 {
     print("SELFTEST PASSED (\(checks) checks)")
     exit(0)

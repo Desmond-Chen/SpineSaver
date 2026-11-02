@@ -101,7 +101,7 @@ struct StatusView: View {
                     HStack(spacing: 8) {
                         Button("开始休息") { model.startRest() }
                             .buttonStyle(.borderedProminent)
-                        Button("5 分钟后提醒") { model.snooze(minutes: 5) }
+                        Button("5 分钟后提醒") { model.snooze(minutes: 5, sourceToken: model.workPromptToken) }
                         Button("自定义…", action: openCustomSnooze)
                     }
                     if let staleHint = snoozeEditor.staleHint {
