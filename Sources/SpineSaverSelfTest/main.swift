@@ -78,7 +78,7 @@ do {
     time.advance(seconds: 45 * 60)
     _ = cycle.tick(time.value, available: true)
     cycle.snooze(time.value)
-    time.advance(seconds: 9 * 60)
+    time.advance(seconds: 4 * 60)
     equal(cycle.tick(time.value, available: true), [], "snooze not yet due")
     check(cycle.isSnoozed, "snoozed phase")
     time.advance(seconds: 60)
@@ -714,6 +714,159 @@ do {
     check(picker.next(using: &generator).id != .restroom, "scene picker skips a remembered scene")
     picker.remember(.breathe)
     equal(picker.lastID, SceneID.breathe, "scene picker remember replaces the previous id")
+}
+
+// 33b. Default snooze is five minutes (plan task 2).
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "default snooze setup due")
+    check(cycle.snooze(time.value), "default snooze accepts while due")
+    check(!cycle.snooze(ManualTime().value), "default snooze rejects a fresh non-due cycle")
+    time.advance(seconds: 299)
+    equal(cycle.tick(time.value, available: true), [], "default snooze not due at 299s")
+    check(cycle.isSnoozed, "default snooze still snoozed at 299s")
+    time.advance(seconds: 1)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "default snooze fires at 300s")
+    check(cycle.isDue, "default snooze ends due")
+    equal(cycle.tick(time.value, available: true), [], "default snooze does not repeat")
+}
+
+// 34. Custom snooze minutes: 1 and 20 boundaries (plan task 2).
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "custom snooze setup due")
+    close(cycle.snooze(time.value, minutes: 1) ?? 0, 60, "custom snooze one minute accepted")
+    time.advance(seconds: 59)
+    equal(cycle.tick(time.value, available: true), [], "custom one minute not due at 59s")
+    check(cycle.isSnoozed, "custom one minute still snoozed at 59s")
+    time.advance(seconds: 1)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "custom one minute fires at 60s")
+
+    var (twenty, twentyTime) = makeCycle()
+    twentyTime.advance(seconds: 45 * 60)
+    equal(twenty.tick(twentyTime.value, available: true), [.reminderDue], "custom twenty setup due")
+    close(twenty.snooze(twentyTime.value, minutes: 20) ?? 0, 1200, "custom snooze twenty minutes accepted")
+    twentyTime.advance(seconds: 1199)
+    equal(twenty.tick(twentyTime.value, available: true), [], "custom twenty not due at 1199s")
+    check(twenty.isSnoozed, "custom twenty still snoozed at 1199s")
+    twentyTime.advance(seconds: 1)
+    equal(twenty.tick(twentyTime.value, available: true), [.reminderDue], "custom twenty fires at 1200s")
+    equal(twenty.tick(twentyTime.value, available: true), [], "custom twenty does not repeat")
+}
+
+// 35. Custom snooze rejections never mutate (plan task 2).
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "rejection setup due")
+    let generation = cycle.generation
+    check(cycle.snooze(time.value, minutes: 0) == nil, "custom snooze rejects zero")
+    check(cycle.snooze(time.value, minutes: 21) == nil, "custom snooze rejects twenty-one")
+    check(cycle.snooze(time.value, minutes: -3) == nil, "custom snooze rejects negative")
+    check(cycle.isDue, "rejected custom snooze keeps phase due")
+    equal(cycle.generation, generation, "rejected custom snooze keeps generation")
+    close(cycle.used, 45 * 60, "rejected custom snooze keeps usage")
+
+    var (counting, countingTime) = makeCycle()
+    countingTime.advance(seconds: 5 * 60)
+    _ = counting.tick(countingTime.value, available: true)
+    let countingGeneration = counting.generation
+    check(counting.snooze(countingTime.value, minutes: 5) == nil, "non-due cycle rejects snooze")
+    check(counting.isCounting, "non-due rejection keeps counting")
+    equal(counting.generation, countingGeneration, "non-due rejection keeps generation")
+    close(counting.used, 5 * 60, "non-due rejection keeps usage")
+}
+
+// 36. Snooze deadline follows the continuous clock, not the date (plan task 2).
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    _ = cycle.tick(time.value, available: true)
+    _ = cycle.snooze(time.value, minutes: 1)
+    time.value.date += 2 * 3600
+    equal(cycle.tick(time.value, available: true), [], "date jump does not end snooze")
+    check(cycle.isSnoozed, "date jump keeps snoozed")
+    time.advanceContinuous(60)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "continuous deadline still fires")
+}
+
+// 37. Rest duration change preserves the snooze deadline; work interval change re-evaluates (plan task 2).
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    _ = cycle.tick(time.value, available: true)
+    _ = cycle.snooze(time.value, minutes: 5)
+    var restChange = cycle.config
+    restChange.suggestedRestDuration = 10 * 60
+    equal(cycle.updateConfiguration(restChange), [], "rest duration change has no reminder effects")
+    check(cycle.isSnoozed, "rest duration change keeps snooze")
+    time.advance(seconds: 299)
+    equal(cycle.tick(time.value, available: true), [], "rest change keeps deadline at 299s")
+    check(cycle.isSnoozed, "rest change still snoozed at 299s")
+    time.advance(seconds: 1)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "rest change keeps deadline at 300s")
+}
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    _ = cycle.tick(time.value, available: true)
+    _ = cycle.snooze(time.value, minutes: 20)
+    var longer = cycle.config
+    longer.workInterval = 60 * 60
+    equal(cycle.updateConfiguration(longer), [.dismissReminder], "work interval extension cancels snooze")
+    check(cycle.isCounting, "extension returns to counting")
+}
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    _ = cycle.tick(time.value, available: true)
+    _ = cycle.snooze(time.value, minutes: 20)
+    var shorter = cycle.config
+    shorter.workInterval = 30 * 60
+    equal(cycle.updateConfiguration(shorter), [.reminderDue], "work interval shortening presents fresh reminder")
+    check(cycle.isDue, "shortening returns to due")
+    equal(cycle.tick(time.value, available: true), [], "shortened due does not repeat")
+}
+
+// 38. Snooze versus the 600-second offscreen threshold (plan task 2).
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "offscreen boundary setup due")
+    _ = cycle.snooze(time.value, minutes: 5)
+    _ = cycle.tick(time.value, available: false)
+    time.advanceContinuous(599.999)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "sub-threshold offscreen lets the snooze deadline fire")
+    check(cycle.isDue, "sub-threshold offscreen ends due")
+}
+do {
+    var (cycle, time) = makeCycle()
+    time.advance(seconds: 45 * 60)
+    equal(cycle.tick(time.value, available: true), [.reminderDue], "threshold reset setup due")
+    _ = cycle.snooze(time.value, minutes: 5)
+    _ = cycle.tick(time.value, available: false)
+    time.advanceContinuous(600)
+    let effects = cycle.tick(time.value, available: true)
+    close(cycle.used, 0, "threshold offscreen resets usage")
+    check(cycle.isCounting, "threshold offscreen returns to counting")
+    check(effects.contains(.dismissReminder), "threshold offscreen dismisses")
+    check(!effects.contains(.reminderDue), "threshold offscreen does not remind")
+}
+
+// 39. Custom snooze minute parsing (plan task 2).
+do {
+    equal(SettingsValidation.snoozeMinutesRange, 1...20, "snooze range is one to twenty")
+    equal(SettingsValidation.parseSnoozeMinutes(" 007\n"), 7, "parse trims and leading zeros")
+    equal(SettingsValidation.parseSnoozeMinutes("5"), 5, "parse five")
+    equal(SettingsValidation.parseSnoozeMinutes("1"), 1, "parse one")
+    equal(SettingsValidation.parseSnoozeMinutes("20"), 20, "parse twenty")
+    equal(SettingsValidation.parseSnoozeMinutes("020"), 20, "parse leading zero twenty")
+    let rejected = ["", " ", "\n\t", "0", "00", "21", "-1", "1.5", "1e1", "5分钟", "+5", "５", "1 0", String(repeating: "9", count: 400)]
+    for text in rejected {
+        check(SettingsValidation.parseSnoozeMinutes(text) == nil, "parse rejects \(text.prefix(8))")
+    }
 }
 
 if failures == 0 {
