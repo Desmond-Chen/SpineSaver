@@ -9,6 +9,7 @@ struct SpineSaverApp: App {
         MenuBarExtra {
             StatusView(
                 model: appDelegate.model,
+                snoozeEditor: appDelegate.model.menuSnoozeEditor,
                 onOpenSettings: { appDelegate.openSettings() },
                 onOpenHistory: { appDelegate.openHistory() }
             )
