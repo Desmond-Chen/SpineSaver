@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var settingsError: String?
     @Published private(set) var reminderChannelWarning: String?
     @Published private(set) var historyWarning: String?
+    @Published private(set) var historyRevision = 0
     private(set) var pendingRestAbandonment: RestAbandonment? = nil
 
     var onOpenSettings: (() -> Void)?
@@ -168,7 +169,9 @@ final class AppModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         activity.stop()
-        recordScreenTime(screenTimeLedger.flush(reading: time.reading()))
+        // Settle the previous eligible interval and end eligibility. Do not tick
+        // the cycle here: exiting must not present a reminder or resume prompt.
+        recordScreenTime(screenTimeLedger.tick(time.reading(), available: false, isCounting: false))
         persistUsage(force: true)
     }
 
@@ -474,7 +477,9 @@ final class AppModel: ObservableObject {
         cycle = copy
         handle(effects)
         presentPendingResumeIfNeeded()
-        recordScreenTime(screenTimeLedger.tick(reading, available: activity.isAvailable, isCounting: copy.isCounting))
+        recordScreenTime(screenTimeLedger.tick(
+            reading, available: activity.isAvailable, isCounting: copy.isObservedWorkEligible
+        ))
         persistUsage(force: effects.contains(.restAutoCompleted))
         scheduleNext()
     }
@@ -699,8 +704,10 @@ final class AppModel: ObservableObject {
         )
         do {
             try historyStore.append(event)
+            historyWarning = nil
+            historyRevision += 1
         } catch {
-            historyWarning = error.localizedDescription
+            historyWarning = "写入 \(kind.rawValue) 记录失败：\(error.localizedDescription)"
         }
     }
 
@@ -718,10 +725,10 @@ final class AppModel: ObservableObject {
     private func scheduleNext() {
         timer?.invalidate()
         timer = nil
-        guard activity.isAvailable,
-              let delay = cycle.nextWake(after: time.reading()) else {
-            return
-        }
+        guard activity.isAvailable else { return }
+        let cycleDelay = cycle.nextWake(after: time.reading())
+        let delay = cycle.isObservedWorkEligible ? min(cycleDelay ?? 60, 60) : cycleDelay
+        guard let delay else { return }
         let generation = cycle.generation
         let timer = Timer(timeInterval: max(0.5, delay), repeats: false) { [weak self] _ in
             Task { @MainActor in

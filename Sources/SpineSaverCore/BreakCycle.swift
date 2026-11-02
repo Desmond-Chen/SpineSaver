@@ -149,6 +149,16 @@ public struct BreakCycle {
     public var isPaused: Bool { if case .paused = phase { return true }; return false }
     public var isResting: Bool { if case .resting = phase { return true }; return false }
     public var isSnoozed: Bool { if case .snoozed = phase { return true }; return false }
+
+    /// Observed work continues after the reminder reaches 100%, including snooze.
+    /// Screen availability is a separate input to the ledger.
+    public var isObservedWorkEligible: Bool {
+        switch phase {
+        case .counting, .due, .snoozed: return true
+        case .paused, .resting: return false
+        }
+    }
+
     public mutating func tick(_ reading: ClockReading, available newAvailable: Bool) -> [BreakEffect] {
         var effects: [BreakEffect] = []
         let awakeDelta = max(0, reading.awake - lastAwake)

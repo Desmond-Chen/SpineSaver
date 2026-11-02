@@ -43,6 +43,13 @@ struct StatusView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if let warning = model.historyWarning {
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             actions
 
             Divider()
