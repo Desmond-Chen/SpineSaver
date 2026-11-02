@@ -5,7 +5,9 @@ import SpineSaverCore
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published private(set) var cycle: BreakCycle
+    @Published private(set) var cycle: BreakCycle {
+        didSet { menuSnoozeEditor.invalidate(unless: workPromptToken) }
+    }
     @Published private(set) var settings: AppSettings
     @Published private(set) var settingsError: String?
     @Published private(set) var reminderChannelWarning: String?
@@ -13,6 +15,7 @@ final class AppModel: ObservableObject {
     private(set) var pendingRestAbandonment: RestAbandonment? = nil
 
     var onOpenSettings: (() -> Void)?
+    let menuSnoozeEditor = SnoozeEditorModel()
 
     private let time: TimeProvider
     private let store: PreferencesStoring
@@ -106,7 +109,10 @@ final class AppModel: ObservableObject {
             Task { @MainActor in self?.tick() }
         }
         presenter.onStartRest = { [weak self] in self?.startRest() }
-        presenter.onSnooze = { [weak self] in self?.snooze() }
+        presenter.onSnooze = { [weak self] token, minutes in
+            guard let self else { return false }
+            return self.snooze(minutes: minutes, sourceToken: token)
+        }
         presenter.onResumeStart = { [weak self] token in
             self?.resumeFromPrompt(
                 sessionID: token.sessionID,
@@ -130,30 +136,17 @@ final class AppModel: ObservableObject {
                     self.resumeFromPrompt(sessionID: session, generation: generation, opportunityID: id)
                     return
                 }
-                let session: String
-                let generation: Int
+                // Work-notification rest/snooze identity is validated after
+                // the settle tick, inside the actions below: a notification
+                // must not act on the pre-settle generation.
                 switch action {
-                case .rest(let valueSession, let valueGeneration):
-                    session = valueSession
-                    generation = valueGeneration
-                case .snooze(let valueSession, let valueGeneration):
-                    session = valueSession
-                    generation = valueGeneration
-                case .resume:
-                    return
-                }
-                guard CycleToken.matches(
-                    sessionID: session,
-                    generation: generation,
-                    currentSessionID: self.sessionID,
-                    currentGeneration: self.cycle.generation
-                ) else { return }
-
-                switch action {
-                case .rest:
-                    self.startRest()
-                case .snooze:
-                    self.snooze()
+                case .rest(let session, let generation):
+                    self.startRest(sourceToken: .init(sessionID: session, generation: generation))
+                case .snooze(let session, let generation, let minutes):
+                    self.snooze(
+                        minutes: minutes,
+                        sourceToken: .init(sessionID: session, generation: generation)
+                    )
                 case .resume:
                     return
                 }
@@ -202,6 +195,9 @@ final class AppModel: ObservableObject {
     var isResting: Bool { cycle.isResting }
     var isAwaitingNextCycle: Bool { cycle.awaitingNextCycle }
     var isSnoozed: Bool { cycle.isSnoozed }
+    var workPromptToken: ReminderPresenter.WorkPromptToken {
+        .init(sessionID: sessionID, generation: cycle.generation)
+    }
 
     var statusTitle: String {
         switch cycle.phase {
@@ -242,19 +238,34 @@ final class AppModel: ObservableObject {
     }
 
     func showReminderForQA() {
-        presenter.show(scene: nextReminderScene())
+        presenter.show(
+            scene: nextReminderScene(),
+            token: .init(sessionID: sessionID, generation: cycle.generation)
+        )
     }
 
-    func startRest() {
+    /// Starts a rest. Menu-bar and panel actions pass no token (the settled
+    /// cycle's own guards apply); a work notification passes the identity it
+    /// was delivered with, validated after the settle tick. Only an accepted
+    /// start records one restStarted event.
+    func startRest(sourceToken: ReminderPresenter.WorkPromptToken? = nil) {
+        var accepted = false
+        mutateCycle { cycle, reading in
+            if let sourceToken {
+                guard Self.matchesCurrentCycle(
+                    sourceToken, sessionID: self.sessionID, cycle: cycle
+                ) else { return }
+            }
+            let wasResting = cycle.isResting
+            cycle.startRest(reading)
+            accepted = !wasResting && cycle.isResting
+        }
+        guard accepted else { return }
         presenter.dismiss()
-        let wasResting = cycle.isResting
-        mutateCycle { cycle, reading in cycle.startRest(reading) }
         if let snapshot = cycle.restSnapshot() {
             store.saveRestSnapshot(snapshot)
         }
-        if !wasResting, cycle.isResting {
-            record(.restStarted, restSeconds: cycle.restDuration, at: time.reading().date)
-        }
+        record(.restStarted, restSeconds: cycle.restDuration, at: time.reading().date)
     }
 
     func finishRest() {
@@ -293,13 +304,33 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func snooze() {
-        presenter.dismiss()
-        let wasDue = cycle.isDue
-        mutateCycle { cycle, reading in cycle.snooze(reading) }
-        if wasDue, cycle.isSnoozed {
-            record(.snoozed, at: time.reading().date)
+    /// Snoozes the due reminder. The default entry (menu bar) passes the
+    /// validated minutes for this action only; custom menu drafts, the panel
+    /// and notifications also pass the source token after the settle tick. Returns
+    /// whether the snooze was accepted; only an accepted snooze dismisses the
+    /// panel and records exactly one snoozed event.
+    @discardableResult
+    func snooze(
+        minutes: Int? = nil,
+        sourceToken: ReminderPresenter.WorkPromptToken? = nil
+    ) -> Bool {
+        var accepted = false
+        mutateCycle { cycle, reading in
+            if let sourceToken {
+                guard Self.matchesCurrentCycle(
+                    sourceToken, sessionID: self.sessionID, cycle: cycle
+                ) else { return }
+            }
+            if let minutes {
+                accepted = cycle.snooze(reading, minutes: minutes) != nil
+            } else {
+                accepted = cycle.snooze(reading)
+            }
         }
+        guard accepted else { return false }
+        presenter.dismiss()
+        record(.snoozed, at: time.reading().date)
+        return true
     }
 
     func setWorkMinutes(_ minutes: Int) {
@@ -402,15 +433,33 @@ final class AppModel: ObservableObject {
         store.saveSettings(settings)
     }
 
+    private static func matchesCurrentCycle(
+        _ token: ReminderPresenter.WorkPromptToken,
+        sessionID: String,
+        cycle: BreakCycle
+    ) -> Bool {
+        CycleToken.matches(
+            sessionID: token.sessionID,
+            generation: token.generation,
+            currentSessionID: sessionID,
+            currentGeneration: cycle.generation
+        )
+    }
+
     private func mutateCycle(_ body: (inout BreakCycle, ClockReading) -> Void) {
         let reading = time.reading()
         var copy = cycle
-        // Settle the interval before the action, but never surface a reminder
-        // for an action that is about to change the state (e.g. pause/rest).
+        // Defer work reminders until the action has either changed the settled
+        // generation or been rejected. Every accepted cycle mutation advances
+        // generation; a rejected stale action must not consume a due reminder.
         let settleEffects = copy.tick(reading, available: activity.isAvailable)
+        let settledGeneration = copy.generation
         handleSettleEffects(settleEffects)
         body(&copy, reading)
         cycle = copy
+        if copy.generation == settledGeneration, settleEffects.contains(.reminderDue) {
+            handle([.reminderDue])
+        }
         if settleEffects.contains(.restAutoCompleted) {
             persistUsage(force: true)
         }
@@ -592,7 +641,10 @@ final class AppModel: ObservableObject {
         let scene = nextReminderScene()
         switch settings.reminderStyle {
         case .miniPanel:
-            presenter.show(scene: scene)
+            presenter.show(
+                scene: scene,
+                token: .init(sessionID: sessionID, generation: cycle.generation)
+            )
         case .systemNotification:
             let sessionID = self.sessionID
             let generation = self.cycle.generation

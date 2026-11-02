@@ -4,13 +4,19 @@ import UserNotifications
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     enum Action: Equatable {
         case rest(sessionID: String, generation: Int)
-        case snooze(sessionID: String, generation: Int)
+        case snooze(sessionID: String, generation: Int, minutes: Int)
         case resume(sessionID: String, generation: Int, opportunityID: String)
     }
 
     static let categoryIdentifier = "SPINESAVER_BREAK"
     static let restActionIdentifier = "SPINESAVER_REST"
+    /// Legacy action identifier: notifications already delivered with the old
+    /// category registration keep their ten-minute meaning. Newly registered
+    /// notifications use `snooze5ActionIdentifier`.
     static let snoozeActionIdentifier = "SPINESAVER_SNOOZE"
+    static let snooze5ActionIdentifier = "SPINESAVER_SNOOZE_5"
+    static let legacySnoozeMinutes = 10
+    static let defaultSnoozeMinutes = 5
     static let sessionKey = "sessionID"
     static let generationKey = "generation"
     static let resumeCategoryIdentifier = "SPINESAVER_RESUME"
@@ -29,8 +35,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, @un
             options: []
         )
         let snooze = UNNotificationAction(
-            identifier: Self.snoozeActionIdentifier,
-            title: "10 分钟后提醒",
+            identifier: Self.snooze5ActionIdentifier,
+            title: "5 分钟后提醒",
             options: []
         )
         let startNext = UNNotificationAction(
@@ -136,11 +142,25 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, @un
         }
         switch actionIdentifier {
         case restActionIdentifier:
-            guard let identity = legacyIdentity(userInfo) else { return nil }
+            guard categoryIdentifier == Self.categoryIdentifier,
+                  let identity = strictIdentity(userInfo) else { return nil }
             return .rest(sessionID: identity.sessionID, generation: identity.generation)
         case snoozeActionIdentifier:
-            guard let identity = legacyIdentity(userInfo) else { return nil }
-            return .snooze(sessionID: identity.sessionID, generation: identity.generation)
+            guard categoryIdentifier == Self.categoryIdentifier,
+                  let identity = strictIdentity(userInfo) else { return nil }
+            return .snooze(
+                sessionID: identity.sessionID,
+                generation: identity.generation,
+                minutes: legacySnoozeMinutes
+            )
+        case snooze5ActionIdentifier:
+            guard categoryIdentifier == Self.categoryIdentifier,
+                  let identity = strictIdentity(userInfo) else { return nil }
+            return .snooze(
+                sessionID: identity.sessionID,
+                generation: identity.generation,
+                minutes: defaultSnoozeMinutes
+            )
         case startNextCycleActionIdentifier:
             guard categoryIdentifier == resumeCategoryIdentifier else { return nil }
             guard let identity = resumeIdentity(userInfo) else { return nil }
@@ -176,14 +196,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, @un
         }
     }
 
-    private static func legacyIdentity(
+    private static func strictIdentity(
         _ userInfo: [AnyHashable: Any]
     ) -> (sessionID: String, generation: Int)? {
-        guard let sessionID = userInfo[sessionKey] as? String,
-              let generationNumber = userInfo[generationKey] as? NSNumber else {
+        guard let sessionID = nonEmptyString(userInfo[sessionKey]),
+              let generation = strictGeneration(userInfo[generationKey]) else {
             return nil
         }
-        return (sessionID, generationNumber.intValue)
+        return (sessionID, generation)
     }
 
     private static func resumeIdentity(
