@@ -869,6 +869,85 @@ do {
     }
 }
 
+// 40. Observed work is independent of the reminder's capped progress.
+do {
+    var reading = ClockReading(awake: 0, continuous: 0, date: Date(timeIntervalSince1970: 0))
+    var config = BreakCycleConfiguration.standard
+    config.workInterval = 60
+    var cycle = BreakCycle(config: config, reading: reading)
+    var ledger = ScreenTimeLedger(reading: reading)
+    _ = ledger.tick(reading, available: true, isCounting: cycle.isObservedWorkEligible)
+    var slices: [ScreenTimeSlice] = []
+    for _ in 0..<3 {
+        reading.awake += 60
+        reading.continuous += 60
+        reading.date += 60
+        _ = cycle.tick(reading, available: true)
+        slices += ledger.tick(reading, available: true, isCounting: cycle.isObservedWorkEligible)
+    }
+    equal(cycle.snooze(reading, minutes: 1), 60, "observed work accepts one-minute snooze")
+    slices += ledger.tick(reading, available: true, isCounting: cycle.isObservedWorkEligible)
+    for _ in 0..<2 {
+        reading.awake += 30
+        reading.continuous += 30
+        reading.date += 30
+        _ = cycle.tick(reading, available: true)
+        slices += ledger.tick(reading, available: true, isCounting: cycle.isObservedWorkEligible)
+    }
+    equal(slices.map(\.seconds), [60, 60, 60, 60], "counting60 due120 snoozed60 emit four minutes")
+    equal(slices.map(\.startDate.timeIntervalSince1970), [0, 60, 120, 180], "observed work preserves interval timestamps")
+    close(slices.reduce(0) { $0 + $1.seconds }, 240, "observed work totals 240 seconds")
+    close(cycle.used, 60, "observed work does not grow capped cycle usage")
+    equal(cycle.percent, 100, "observed work keeps progress capped at 100 percent")
+    reading.continuous += 600
+    reading.date += 600
+    _ = cycle.tick(reading, available: true)
+    equal(ledger.tick(reading, available: true, isCounting: cycle.isObservedWorkEligible), [], "due sleep adds no observed work")
+}
+
+// 41. Excluded phases and screen unavailability add no observed work.
+for state in ["paused", "resting", "awaiting", "offscreen"] {
+    var reading = ClockReading(awake: 0, continuous: 0, date: Date(timeIntervalSince1970: 0))
+    var cycle = BreakCycle(reading: reading)
+    let available = state != "offscreen"
+    switch state {
+    case "paused": cycle.pause(reading)
+    case "resting": cycle.startRest(reading)
+    case "awaiting":
+        cycle.startRest(reading)
+        reading = ClockReading(awake: 120, continuous: 120, date: reading.date.addingTimeInterval(120))
+        _ = cycle.tick(reading, available: true)
+        check(cycle.awaitingNextCycle, "observed work exclusion reaches awaiting state")
+    default: _ = cycle.tick(reading, available: false)
+    }
+    var ledger = ScreenTimeLedger(reading: reading)
+    _ = ledger.tick(reading, available: available, isCounting: cycle.isObservedWorkEligible)
+    reading.awake += 60
+    reading.continuous += 60
+    reading.date += 60
+    _ = cycle.tick(reading, available: available)
+    equal(ledger.tick(reading, available: available, isCounting: cycle.isObservedWorkEligible), [], "\(state) emits no observed work")
+    equal(ledger.flush(reading: reading), [], "\(state) leaves no observed work remainder")
+}
+
+// 42. Exit settles the final eligible interval once without ticking the cycle.
+do {
+    var reading = ClockReading(awake: 0, continuous: 0, date: Date(timeIntervalSince1970: 0))
+    let cycle = BreakCycle(reading: reading)
+    var ledger = ScreenTimeLedger(reading: reading)
+    _ = ledger.tick(reading, available: true, isCounting: cycle.isObservedWorkEligible)
+    reading = ClockReading(awake: 37, continuous: 37, date: reading.date.addingTimeInterval(37))
+    equal(ledger.tick(reading, available: false, isCounting: false),
+          [ScreenTimeSlice(startDate: Date(timeIntervalSince1970: 0), seconds: 37)],
+          "exit settles the last 37 seconds before flush")
+    equal(ledger.flush(reading: reading), [], "exit leaves no duplicate remainder")
+    reading.awake += 100
+    reading.continuous += 100
+    reading.date += 100
+    equal(ledger.tick(reading, available: false, isCounting: false), [], "repeated exit cannot count stopped time")
+    equal(ledger.flush(reading: reading), [], "repeated exit flush remains empty")
+}
+
 if failures == 0 {
     print("SELFTEST PASSED (\(checks) checks)")
     exit(0)
