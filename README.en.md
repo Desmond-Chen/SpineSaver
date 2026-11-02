@@ -19,10 +19,12 @@ sync, no network.
 - 45 minute work cycle by default, adjustable from 15 to 120 minutes. Break
   length is adjustable from 2 to 15 minutes, default 2 minutes.
 - When the cycle ends it shows one 696 x 380 pt mini panel that does not take
-  input focus. You can start the break or snooze for 10 minutes. Each reminder
-  picks one of six scenes (walk, stretch, drink water, restroom, look into the
-  distance, breathe slowly); consecutive reminders never repeat a scene, and
-  the randomiser can be switched off in Settings.
+  input focus. You can start the break, snooze for the default 5 minutes, or
+  pick Custom and enter 1 to 20 whole minutes for this reminder only (the app
+  does not remember the value). Each reminder picks one of six scenes (walk,
+  stretch, drink water, restroom, look into the distance, breathe slowly);
+  consecutive reminders never repeat a scene, and the randomiser can be
+  switched off in Settings.
 - When the break countdown reaches 00:00 it ends automatically. If the screen is
   available it shows one "break finished" prompt with **Start next cycle** and
   **Later**. The next cycle never starts on its own.
@@ -31,6 +33,10 @@ sync, no network.
   colour.
 - System sleep, display sleep, and user session switching freeze accumulation.
   Ten minutes of continuous absence restarts the screen timer.
+- After the reminder appears and while a snooze is running, the app keeps
+  recording observed work time (the cycle's percentage stays capped at 100%).
+  Resting, manual pause, and waiting for a manual next-cycle start are not
+  recorded.
 - The percentage is a proxy for this cycle's screen-available time. It is not a
   fatigue score, a posture measurement, or a health rating.
 - Local history records screen time slices, reminders, snoozes, and break
@@ -82,7 +88,11 @@ The current build is Apple Silicon (arm64). Intel Macs must build from source.
 Click the menu bar item to open the panel:
 
 - **Counting:** accumulated and remaining time, with pause or start break now.
-- **Due:** Start break, or remind me in 10 minutes.
+- **Due:** Start break, snooze 5 minutes (the default), or Custom for 1 to 20
+  whole minutes applying to this reminder only. The menu bar panel offers the
+  same three actions; the system notification channel offers only Start break
+  and the default 5-minute snooze, so use the mini panel or the menu bar for a
+  custom duration.
 - **Resting:** remaining countdown; ends automatically at 00:00, and can be
   finished early or cancelled.
 - **Break finished, waiting to start:** one prompt appears when the screen is
@@ -111,7 +121,14 @@ window shows the three views, exports, and deletion.
   disappearing.
 - CSV and JSON exports include version, export time, time zone, units, field
   descriptions, and definitions. You choose where to save them; nothing is
-  uploaded.
+  uploaded. After you confirm the save dialog, the app re-reads the history
+  once before writing the export.
+- If the statistics look stale, first copy the raw
+  `~/Library/Application Support/SpineSaver/history.jsonl`, then export a fresh
+  JSON from the history window and compare event by event. The window and the
+  export share one latest-good snapshot, so an export alone is not evidence of
+  what reached disk; write failures show a warning in Settings and the history
+  window.
 - Deleting history requires a second confirmation. Resetting settings does not
   delete history.
 - Records describe in-app timers and actions only. They cannot prove that you
@@ -139,6 +156,11 @@ See [docs/PRIVACY.md](docs/PRIVACY.md) for data locations.
   back to the mini panel when a notification is hidden.
 - Relaunching while waiting after a break restores a plain pause, without
   re-showing the completion prompt.
+- After the follow-up reminder you can snooze again; the current
+  implementation does not cap snoozes per cycle (whether to tighten this is
+  pending a product decision).
+- The `appVersion` in exports and history is self-reported and cannot identify
+  a specific build; check Finder's Get Info when diagnosing.
 - Launch at login is managed by `SMAppService` and may require approval.
 
 ## QA switches
@@ -150,7 +172,6 @@ SPINESAVER_QA_SUITE=com.desmond.spinesaver.qa \
 SPINESAVER_QA_RESET=1 \
 SPINESAVER_QA_START_COUNTING=1 \
 SPINESAVER_QA_INTERVAL_SECONDS=6 \
-SPINESAVER_QA_SNOOZE_SECONDS=3 \
 SPINESAVER_QA_REST_SECONDS=2 \
 SPINESAVER_QA_HISTORY_PATH="$TMP/history.jsonl" \
 ./build/SpineSaver.app/Contents/MacOS/SpineSaver

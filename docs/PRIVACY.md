@@ -19,11 +19,12 @@ SpineSaver 是一个纯本地的 macOS 菜单栏休息提醒器。它不联网�
 | 本轮进度与休息快照 | UserDefaults 域 `com.desmond.spinesaver` |
 | 使用习惯事件（屏幕计时、提醒、推迟、休息开始/完成/提前结束/取消/放弃、应用退出） | `~/Library/Application Support/SpineSaver/history.jsonl` |
 
-历史记录是事件级 JSONL，`schemaVersion` 为 1，保留到你主动删除为止。
+历史记录是事件级 JSONL，`schemaVersion` 为 1，保留到你主动删除为止。推迟只记录一个 `snoozed` 事件，不保存你选择的分钟数；“自定义…”的分钟数只在本次推迟动作中生效，不写入任何设置。未新增事件类型或字段。
 
 ## 你能做什么
 
 - 在"统计…"窗口查看记录范围、导出 CSV 或 JSON（由你选择保存位置）。
+- 排查问题时复制 `history.jsonl` 即可得到全部本地记录的副本，与应用内导出对照即可分辨“没记录”与“窗口没刷新”。
 - 在"统计…"窗口删除全部历史，需要二次确认。
 - 重置设置不会删除历史。
 - 删除 `~/Library/Application Support/SpineSaver/history.jsonl` 也能清空历史。
