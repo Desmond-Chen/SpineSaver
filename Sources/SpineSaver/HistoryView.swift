@@ -28,9 +28,14 @@ enum HistoryExportKind {
 
 @MainActor
 final class HistoryViewModel: ObservableObject {
-    @Published var events: [HistoryEvent] = []
+    @Published private(set) var events: [HistoryEvent] = []
+    @Published private(set) var skippedLines = 0
+    @Published private(set) var lastLoadedAt: Date?
+    @Published private(set) var isStale = false
+    @Published private(set) var readErrorMessage: String?
+    @Published private(set) var exportErrorMessage: String?
+    @Published private(set) var deleteErrorMessage: String?
     @Published var range: HistoryRange = .today
-    @Published var errorMessage: String?
     @Published var showDeleteConfirmation = false
 
     let store: HistoryStore
@@ -44,6 +49,17 @@ final class HistoryViewModel: ObservableObject {
 
     var todayStart: Date {
         calendar.startOfDay(for: Date())
+    }
+
+    var hasSnapshot: Bool {
+        lastLoadedAt != nil
+    }
+
+    var lastLoadedText: String? {
+        guard let lastLoadedAt else { return nil }
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        return formatter.string(from: lastLoadedAt)
     }
 
     var dailyBuckets: [HistoryBucket] {
@@ -88,11 +104,12 @@ final class HistoryViewModel: ObservableObject {
     }
 
     var rangeText: String {
-        guard let range = try? store.dateRange() else { return "无" }
+        let times = events.map(\.occurredAt)
+        guard let first = times.min(), let last = times.max() else { return "无" }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
-        return "\(formatter.string(from: range.lowerBound)) - \(formatter.string(from: range.upperBound))"
+        return "\(formatter.string(from: first)) - \(formatter.string(from: last))"
     }
 
     func dayLabel(_ date: Date) -> String {
@@ -118,21 +135,33 @@ final class HistoryViewModel: ObservableObject {
 
     func reload() {
         do {
-            events = try store.load().events
-            errorMessage = nil
+            apply(try store.load())
         } catch {
-            events = []
-            errorMessage = error.localizedDescription
+            markReadFailed(error)
         }
     }
 
     func deleteAll() {
+        deleteErrorMessage = nil
         do {
             try store.deleteAll()
-            reload()
         } catch {
-            errorMessage = error.localizedDescription
+            deleteErrorMessage = error.localizedDescription
         }
+        reload()
+    }
+
+    private func apply(_ result: HistoryLoadResult) {
+        events = result.events
+        skippedLines = result.skippedLines
+        lastLoadedAt = Date()
+        isStale = false
+        readErrorMessage = nil
+    }
+
+    private func markReadFailed(_ error: Error) {
+        readErrorMessage = error.localizedDescription
+        isStale = true
     }
 
     func export(_ kind: HistoryExportKind) {
@@ -141,17 +170,32 @@ final class HistoryViewModel: ObservableObject {
         panel.nameFieldStringValue = "SpineSaver-history-\(Self.dateString(Date())).\(kind == .csv ? "csv" : "json")"
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        exportErrorMessage = nil
+
+        let fresh: HistoryLoadResult
+        do {
+            fresh = try store.load()
+        } catch {
+            markReadFailed(error)
+            exportErrorMessage = "导出已取消：无法读取最新历史记录，未写入文件。"
+            return
+        }
+        apply(fresh)
+        if fresh.skippedLines > 0 {
+            exportErrorMessage = "导出已取消：\(fresh.skippedLines) 行记录无法解析，已阻止导出不完整数据。"
+            return
+        }
         let data: Data
         switch kind {
         case .csv:
-            data = HistoryExporter.csv(events: events, timeZone: .current)
+            data = HistoryExporter.csv(events: fresh.events, timeZone: .current)
         case .json:
-            data = HistoryExporter.json(events: events, timeZone: .current)
+            data = HistoryExporter.json(events: fresh.events, timeZone: .current)
         }
         do {
             try data.write(to: url, options: .atomic)
         } catch {
-            errorMessage = error.localizedDescription
+            exportErrorMessage = "写入导出文件失败：\(error.localizedDescription)"
         }
     }
 
@@ -180,7 +224,11 @@ struct HistoryView: View {
                 .frame(width: 240)
             }
 
-            if model.events.isEmpty {
+            if let readError = model.readErrorMessage, !model.hasSnapshot {
+                Text("读取历史记录失败：\(readError)")
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, minHeight: 320)
+            } else if model.events.isEmpty {
                 Text("暂无记录。完成一次计时或休息后，这里会出现本机记录。")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 320)
@@ -188,14 +236,26 @@ struct HistoryView: View {
                 content
             }
 
-            HStack(spacing: 16) {
-                Text("记录范围：\(model.rangeText)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("\(model.events.count) 条事件")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 16) {
+                    Text("记录范围：\(model.rangeText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(model.events.count) 条事件")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if model.skippedLines > 0 {
+                        Text("跳过 \(model.skippedLines) 行无法解析的记录")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                if let loadedText = model.lastLoadedText {
+                    Text("上次读取：\(loadedText)\(model.isStale ? "（数据可能已过期）" : "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack(spacing: 12) {
@@ -207,8 +267,18 @@ struct HistoryView: View {
                 }
             }
 
-            if let errorMessage = model.errorMessage {
-                Text(errorMessage)
+            if let readError = model.readErrorMessage, model.hasSnapshot {
+                Text("刷新失败，仍显示上次成功读取的数据：\(readError)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if let exportError = model.exportErrorMessage {
+                Text(exportError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if let deleteError = model.deleteErrorMessage {
+                Text("删除历史失败：\(deleteError)")
                     .font(.caption)
                     .foregroundStyle(.red)
             }
