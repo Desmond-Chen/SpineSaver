@@ -35,6 +35,7 @@ final class HistoryViewModel: ObservableObject {
     @Published private(set) var readErrorMessage: String?
     @Published private(set) var exportErrorMessage: String?
     @Published private(set) var deleteErrorMessage: String?
+    @Published var writerWarning: String?
     @Published var range: HistoryRange = .today
     @Published var showDeleteConfirmation = false
 
@@ -224,6 +225,13 @@ struct HistoryView: View {
                 .frame(width: 240)
             }
 
+            if let warning = model.writerWarning {
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let readError = model.readErrorMessage, !model.hasSnapshot {
                 Text("读取历史记录失败：\(readError)")
                     .foregroundStyle(.red)
@@ -285,7 +293,6 @@ struct HistoryView: View {
         }
         .padding(20)
         .frame(minWidth: 840, minHeight: 620)
-        .onAppear(perform: model.reload)
         .alert("删除全部历史？", isPresented: $model.showDeleteConfirmation) {
             Button("取消", role: .cancel) {}
             Button("删除", role: .destructive) {
