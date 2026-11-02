@@ -14,21 +14,32 @@ final class ReminderPresenter {
         let opportunityID: Int
     }
 
+    /// Identity a work-reminder action (start rest / snooze) carries back to
+    /// AppModel. Validated against the live session and the settled cycle
+    /// generation before any state change, so a stale panel or notification
+    /// cannot mutate a later cycle.
+    struct WorkPromptToken: Equatable {
+        let sessionID: String
+        let generation: Int
+    }
+
     var onStartRest: (() -> Void)?
-    var onSnooze: (() -> Void)?
+    var onSnooze: ((WorkPromptToken, Int) -> Bool)?
     var onResumeStart: ((ResumePromptToken) -> Void)?
     var onResumeLater: ((ResumePromptToken) -> Void)?
 
     private enum ContentKind: Equatable {
-        case workReminder(ReminderScene)
+        case workReminder(ReminderScene, WorkPromptToken)
         case resume(ResumePromptToken)
     }
 
     private var panel: NSPanel?
     private var displayedContent: ContentKind?
+    /// Editor state for the work reminder currently bound to the panel.
+    let snoozeEditor = SnoozeEditorModel()
 
-    func show(scene: ReminderScene) {
-        present(.workReminder(scene))
+    func show(scene: ReminderScene, token: WorkPromptToken) {
+        present(.workReminder(scene, token))
     }
 
     /// Presents the resume panel bound to `token`. Replaces any work reminder
@@ -57,6 +68,9 @@ final class ReminderPresenter {
             buildPanel()
         }
         if displayedContent != content {
+            if case .workReminder = content {
+                snoozeEditor.resetForPresentation()
+            }
             panel?.contentView = makeContentView(for: content)
             displayedContent = content
         }
@@ -86,11 +100,16 @@ final class ReminderPresenter {
 
     private func makeContentView(for content: ContentKind) -> NSView? {
         switch content {
-        case .workReminder(let scene):
+        case .workReminder(let scene, let token):
             let view = ReminderView(
                 scene: scene,
+                token: token,
+                editor: snoozeEditor,
                 onRest: { [weak self] in self?.onStartRest?() },
-                onSnooze: { [weak self] in self?.onSnooze?() },
+                onSnooze: { [weak self] minutes in
+                    guard let self else { return false }
+                    return self.onSnooze?(token, minutes) ?? false
+                },
                 onClose: { [weak self] in self?.dismiss() }
             )
             return NSHostingView(rootView: view)
@@ -119,8 +138,11 @@ final class ReminderPresenter {
 
 struct ReminderView: View {
     let scene: ReminderScene
+    let token: ReminderPresenter.WorkPromptToken
+    @ObservedObject var editor: SnoozeEditorModel
     let onRest: () -> Void
-    let onSnooze: () -> Void
+    /// Submits a snooze for this reminder (minutes -> whether it was accepted).
+    let onSnooze: (Int) -> Bool
     let onClose: () -> Void
 
     var body: some View {
@@ -147,17 +169,42 @@ struct ReminderView: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 12) {
-                Button("开始休息", action: onRest)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-                Button("10 分钟后提醒", action: onSnooze)
-                    .controlSize(.large)
-                Spacer(minLength: 0)
-                Button("关闭", action: onClose)
-                    .buttonStyle(.borderless)
-                    .controlSize(.large)
+            if editor.isShown {
+                VStack(alignment: .leading, spacing: 8) {
+                    CustomSnoozeView(
+                        editor: editor,
+                        submit: { minutes in
+                            let accepted = onSnooze(minutes)
+                            if !accepted { editor.staleHint = "本轮提醒已变化，未推迟。" }
+                            return accepted
+                        }
+                    )
+                    Text(editor.staleHint ?? "自定义推迟 1–20 分钟，仅对本次生效。")
+                        .font(.caption)
+                        .foregroundStyle(editor.staleHint == nil ? Color.secondary : Color.orange)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Button("开始休息", action: onRest)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .keyboardShortcut(.defaultAction)
+                        Button("5 分钟后提醒") { _ = onSnooze(5) }
+                            .controlSize(.large)
+                        Button("自定义…", action: editor.open)
+                            .controlSize(.large)
+                        Spacer(minLength: 0)
+                        Button("关闭", action: onClose)
+                            .buttonStyle(.borderless)
+                            .controlSize(.large)
+                    }
+                    if let staleHint = editor.staleHint {
+                        Text(staleHint)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
             }
         }
         .padding(ReminderLayout.padding)

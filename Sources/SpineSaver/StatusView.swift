@@ -13,6 +13,7 @@ struct MenuBarLabel: View {
 
 struct StatusView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject var snoozeEditor: SnoozeEditorModel
     let onOpenSettings: () -> Void
     let onOpenHistory: () -> Void
 
@@ -80,10 +81,28 @@ struct StatusView: View {
                 }
             }
         } else if model.isDue {
-            HStack(spacing: 8) {
-                Button("开始休息") { model.startRest() }
-                    .buttonStyle(.borderedProminent)
-                Button("10 分钟后提醒") { model.snooze() }
+            VStack(alignment: .leading, spacing: 8) {
+                if snoozeEditor.isShown {
+                    CustomSnoozeView(
+                        editor: snoozeEditor,
+                        submit: submitCustomSnooze
+                    )
+                    Text(snoozeEditor.staleHint ?? "自定义推迟 1–20 分钟，仅对本次生效。")
+                        .font(.caption)
+                        .foregroundStyle(snoozeEditor.staleHint == nil ? Color.secondary : Color.orange)
+                } else {
+                    HStack(spacing: 8) {
+                        Button("开始休息") { model.startRest() }
+                            .buttonStyle(.borderedProminent)
+                        Button("5 分钟后提醒") { model.snooze(minutes: 5) }
+                        Button("自定义…", action: openCustomSnooze)
+                    }
+                    if let staleHint = snoozeEditor.staleHint {
+                        Text(staleHint)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
             }
             Button("暂停计时") { model.pause() }
                 .buttonStyle(.borderless)
@@ -94,5 +113,16 @@ struct StatusView: View {
                 Button("暂停计时") { model.pause() }
             }
         }
+    }
+
+    func openCustomSnooze() {
+        snoozeEditor.open(sourceToken: model.workPromptToken)
+    }
+
+    func submitCustomSnooze(_ minutes: Int) -> Bool {
+        guard let sourceToken = snoozeEditor.sourceToken else { return false }
+        let accepted = model.snooze(minutes: minutes, sourceToken: sourceToken)
+        snoozeEditor.staleHint = accepted ? nil : "本轮提醒已变化，未推迟。"
+        return accepted
     }
 }
