@@ -56,11 +56,25 @@ final class BreakCycleTests: XCTestCase {
         XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
         cycle.snooze(time.value)
 
-        time.advance(seconds: 9 * 60)
+        time.advance(seconds: 4 * 60)
         XCTAssertEqual(cycle.tick(time.value, available: true), [])
         XCTAssertTrue(cycle.isSnoozed)
 
         time.advance(seconds: 1 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertTrue(cycle.isDue)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [])
+    }
+
+    func testDefaultSnoozeIsFiveMinutes() {
+        var (cycle, time) = makeCycle()
+        time.advance(seconds: 45 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertTrue(cycle.snooze(time.value))
+        time.advance(seconds: 299)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [])
+        XCTAssertTrue(cycle.isSnoozed)
+        time.advance(seconds: 1)
         XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
         XCTAssertTrue(cycle.isDue)
         XCTAssertEqual(cycle.tick(time.value, available: true), [])
@@ -424,6 +438,124 @@ final class BreakCycleTests: XCTestCase {
         let effects = cycle.tick(time.value, available: true)
         XCTAssertEqual(cycle.used, 0, accuracy: 0.001)
         XCTAssertTrue(cycle.isCounting)
+        XCTAssertFalse(effects.contains(.reminderDue))
+    }
+
+    func testCustomSnoozeOneAndTwentyMinuteBoundaries() {
+        var (cycle, time) = makeCycle()
+        time.advance(seconds: 45 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertEqual(cycle.snooze(time.value, minutes: 1), 60)
+        time.advance(seconds: 59)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [])
+        XCTAssertTrue(cycle.isSnoozed)
+        time.advance(seconds: 1)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertTrue(cycle.isDue)
+
+        var (twenty, twentyTime) = makeCycle()
+        twentyTime.advance(seconds: 45 * 60)
+        XCTAssertEqual(twenty.tick(twentyTime.value, available: true), [.reminderDue])
+        XCTAssertEqual(twenty.snooze(twentyTime.value, minutes: 20), 1200)
+        twentyTime.advance(seconds: 1199)
+        XCTAssertEqual(twenty.tick(twentyTime.value, available: true), [])
+        XCTAssertTrue(twenty.isSnoozed)
+        twentyTime.advance(seconds: 1)
+        XCTAssertEqual(twenty.tick(twentyTime.value, available: true), [.reminderDue])
+        XCTAssertTrue(twenty.isDue)
+    }
+
+    func testCustomSnoozeRejectionsDoNotMutate() {
+        var (cycle, time) = makeCycle()
+        time.advance(seconds: 45 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        let generation = cycle.generation
+        XCTAssertNil(cycle.snooze(time.value, minutes: 0))
+        XCTAssertNil(cycle.snooze(time.value, minutes: 21))
+        XCTAssertNil(cycle.snooze(time.value, minutes: -3))
+        XCTAssertTrue(cycle.isDue)
+        XCTAssertEqual(cycle.generation, generation)
+        XCTAssertEqual(cycle.used, 45 * 60, accuracy: 0.001)
+
+        var (counting, countingTime) = makeCycle()
+        countingTime.advance(seconds: 5 * 60)
+        _ = counting.tick(countingTime.value, available: true)
+        let countingGeneration = counting.generation
+        XCTAssertNil(counting.snooze(countingTime.value, minutes: 5))
+        XCTAssertTrue(counting.isCounting)
+        XCTAssertEqual(counting.generation, countingGeneration)
+        XCTAssertEqual(counting.used, 5 * 60, accuracy: 0.001)
+    }
+
+    func testSnoozeDeadlineIgnoresDateJump() {
+        var (cycle, time) = makeCycle()
+        time.advance(seconds: 45 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertNotNil(cycle.snooze(time.value, minutes: 1))
+        time.value.date += 2 * 3600
+        XCTAssertEqual(cycle.tick(time.value, available: true), [])
+        XCTAssertTrue(cycle.isSnoozed)
+        time.advanceContinuous(60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+    }
+
+    func testRestDurationChangePreservesSnoozeDeadline() {
+        var (cycle, time) = makeCycle()
+        time.advance(seconds: 45 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertNotNil(cycle.snooze(time.value, minutes: 5))
+        var restChange = cycle.config
+        restChange.suggestedRestDuration = 10 * 60
+        XCTAssertEqual(cycle.updateConfiguration(restChange), [])
+        XCTAssertTrue(cycle.isSnoozed)
+        time.advance(seconds: 299)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [])
+        XCTAssertTrue(cycle.isSnoozed)
+        time.advance(seconds: 1)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+    }
+
+    func testWorkIntervalChangeDuringSnoozeReevaluates() {
+        var (cycle, time) = makeCycle()
+        time.advance(seconds: 45 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertNotNil(cycle.snooze(time.value, minutes: 20))
+        var longer = cycle.config
+        longer.workInterval = 60 * 60
+        XCTAssertEqual(cycle.updateConfiguration(longer), [.dismissReminder])
+        XCTAssertTrue(cycle.isCounting)
+
+        var (shortCycle, shortTime) = makeCycle()
+        shortTime.advance(seconds: 45 * 60)
+        XCTAssertEqual(shortCycle.tick(shortTime.value, available: true), [.reminderDue])
+        XCTAssertNotNil(shortCycle.snooze(shortTime.value, minutes: 20))
+        var shorter = shortCycle.config
+        shorter.workInterval = 30 * 60
+        XCTAssertEqual(shortCycle.updateConfiguration(shorter), [.reminderDue])
+        XCTAssertTrue(shortCycle.isDue)
+        XCTAssertEqual(shortCycle.tick(shortTime.value, available: true), [])
+    }
+
+    func testSnoozeOffscreenBoundaryAtThreshold() {
+        var (cycle, time) = makeCycle()
+        time.advance(seconds: 45 * 60)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertNotNil(cycle.snooze(time.value, minutes: 5))
+        _ = cycle.tick(time.value, available: false)
+        time.advanceContinuous(599.999)
+        XCTAssertEqual(cycle.tick(time.value, available: true), [.reminderDue])
+        XCTAssertTrue(cycle.isDue)
+
+        var (resetCycle, resetTime) = makeCycle()
+        resetTime.advance(seconds: 45 * 60)
+        XCTAssertEqual(resetCycle.tick(resetTime.value, available: true), [.reminderDue])
+        XCTAssertNotNil(resetCycle.snooze(resetTime.value, minutes: 5))
+        _ = resetCycle.tick(resetTime.value, available: false)
+        resetTime.advanceContinuous(600)
+        let effects = resetCycle.tick(resetTime.value, available: true)
+        XCTAssertEqual(resetCycle.used, 0, accuracy: 0.001)
+        XCTAssertTrue(resetCycle.isCounting)
+        XCTAssertTrue(effects.contains(.dismissReminder))
         XCTAssertFalse(effects.contains(.reminderDue))
     }
 

@@ -20,7 +20,7 @@ public struct BreakCycleConfiguration: Equatable {
 
     public static let standard = BreakCycleConfiguration(
         workInterval: 45 * 60,
-        snoozeInterval: 10 * 60,
+        snoozeInterval: 5 * 60,
         offscreenResetThreshold: 10 * 60,
         suggestedRestDuration: 2 * 60
     )
@@ -267,9 +267,29 @@ public struct BreakCycle {
         reanchor(reading)
     }
 
-    public mutating func snooze(_ reading: ClockReading) {
-        guard isDue else { return }
-        phase = .snoozed(until: reading.continuous + config.snoozeInterval)
+    /// Snoozes the due reminder by the configured default interval.
+    /// Returns false (without mutating) when the cycle is not due.
+    @discardableResult
+    public mutating func snooze(_ reading: ClockReading) -> Bool {
+        guard isDue else { return false }
+        applySnooze(until: reading.continuous + config.snoozeInterval, reading)
+        return true
+    }
+
+    /// Snoozes the due reminder for this cycle only, by a validated number of
+    /// whole minutes (1...20). Returns the accepted duration in seconds, or
+    /// nil — without mutating — when the minutes are out of range or the
+    /// cycle is not due.
+    @discardableResult
+    public mutating func snooze(_ reading: ClockReading, minutes: Int) -> TimeInterval? {
+        guard SettingsValidation.snoozeMinutesRange.contains(minutes), isDue else { return nil }
+        let duration = TimeInterval(minutes) * 60
+        applySnooze(until: reading.continuous + duration, reading)
+        return duration
+    }
+
+    private mutating func applySnooze(until: TimeInterval, _ reading: ClockReading) {
+        phase = .snoozed(until: until)
         reminderPresented = true
         awaitingNextCycle = false
         generation += 1
@@ -279,12 +299,29 @@ public struct BreakCycle {
     @discardableResult
     public mutating func updateConfiguration(_ newConfig: BreakCycleConfiguration) -> [BreakEffect] {
         guard newConfig != config else { return [] }
+        let previousWorkInterval = config.workInterval
+
+        // A change that does not touch the work interval (rest duration,
+        // snooze default, offscreen threshold) never disturbs an accepted
+        // snooze deadline.
+        if case .snoozed = phase, newConfig.workInterval == previousWorkInterval {
+            config = newConfig
+            generation += 1
+            return []
+        }
+
         let wasDueOrSnoozed: Bool
+        let wasSnoozed: Bool
         switch phase {
-        case .due, .snoozed:
+        case .due:
             wasDueOrSnoozed = true
+            wasSnoozed = false
+        case .snoozed:
+            wasDueOrSnoozed = true
+            wasSnoozed = true
         default:
             wasDueOrSnoozed = false
+            wasSnoozed = false
         }
 
         config = newConfig
@@ -299,6 +336,12 @@ public struct BreakCycle {
             if used >= config.workInterval - 0.0001 {
                 used = config.workInterval
                 phase = .due
+                if wasSnoozed {
+                    // Coming out of a snooze into due: the follow-up reminder
+                    // has not been seen yet, so this due must present one
+                    // instead of sitting silently with no deadline.
+                    reminderPresented = false
+                }
                 if !reminderPresented {
                     reminderPresented = true
                     effects.append(.reminderDue)
