@@ -367,6 +367,12 @@ struct HistoryView: View {
                 y: .value("分钟", bucket.screenSeconds / 60)
             )
             .foregroundStyle(Color.accentColor)
+            .annotation(position: .top, spacing: 4) {
+                Text(DurationText.axis(seconds: bucket.screenSeconds))
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
         .chartXAxis {
             AxisMarks(values: .stride(by: model.xComponent, count: model.xStride)) { value in
@@ -379,6 +385,7 @@ struct HistoryView: View {
                 }
             }
         }
+        .chartYScale(domain: 0...durationUpperBound)
         .chartYAxis {
             AxisMarks { value in
                 AxisGridLine()
@@ -391,6 +398,11 @@ struct HistoryView: View {
         }
         .chartYAxisLabel("分钟")
         .frame(height: 180)
+    }
+
+    private var durationUpperBound: Double {
+        let maxMinutes = model.buckets.map { $0.screenSeconds / 60 }.max() ?? 0
+        return max(1, maxMinutes * 1.2)
     }
 
     private var restChart: some View {
