@@ -125,36 +125,45 @@ struct TodayTimelineView: View {
     }
 
     private func hourlyChart(_ hourly: [HourlyTotal]) -> some View {
-        Chart(hourly, id: \.hour) { item in
-            BarMark(
-                x: .value("小时", item.hour),
-                y: .value("分钟", item.workSeconds / 60)
-            )
-            .foregroundStyle(Color.accentColor)
-        }
-        .chartXAxis {
-            AxisMarks(values: [0, 3, 6, 9, 12, 15, 18, 21]) { value in
-                AxisGridLine()
-                AxisTick()
-                AxisValueLabel {
-                    if let hour = value.as(Int.self) {
-                        Text("\(hour)")
+        VStack(alignment: .leading, spacing: 6) {
+            Text("每小时工作计时")
+                .font(.headline)
+            Text("每根柱表示该小时内记录到的计时分钟数，例如 09 对应 09:00 至 10:00。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Chart(hourly, id: \.hour) { item in
+                BarMark(
+                    x: .value("小时", item.hour),
+                    y: .value("分钟", item.workSeconds / 60)
+                )
+                .foregroundStyle(Color.accentColor)
+            }
+            .chartXScale(domain: -0.5...23.5)
+            .chartXAxis {
+                AxisMarks(preset: .aligned, values: [0, 3, 6, 9, 12, 15, 18, 21]) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel(anchor: .top) {
+                        if let hour = value.as(Int.self) {
+                            Text(String(format: "%02d", hour))
+                        }
                     }
                 }
             }
-        }
-        .chartYAxis {
-            AxisMarks { value in
-                AxisGridLine()
-                AxisValueLabel {
-                    if let minutes = value.as(Double.self) {
-                        Text(DurationText.axis(seconds: minutes * 60))
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let minutes = value.as(Double.self) {
+                            Text(DurationText.axis(seconds: minutes * 60))
+                        }
                     }
                 }
             }
+            .chartYAxisLabel("分钟")
+            .chartXAxisLabel("时")
+            .frame(height: 130)
         }
-        .chartYAxisLabel("分钟")
-        .frame(height: 130)
     }
 
     private var dayWindow: (start: Date, end: Date) {
