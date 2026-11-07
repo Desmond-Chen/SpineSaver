@@ -33,6 +33,9 @@ struct TodayTimelineView: View {
                     .frame(maxWidth: .infinity, minHeight: 160)
             } else {
                 timelineChart(segments, now: now)
+                Text("窄柱标记短休息或提醒的位置，宽度不代表时长。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Divider()
                 hourlyChart(hourly)
             }
@@ -67,29 +70,35 @@ struct TodayTimelineView: View {
             ForEach(segments.indices, id: \.self) { index in
                 let segment = segments[index]
                 if segment.kind == .reminder {
-                    PointMark(
+                    RectangleMark(
                         x: .value("时间", segment.start),
-                        y: .value("类型", laneTitle(.reminder))
+                        y: .value("类型", laneTitle(.reminder)),
+                        width: .fixed(2),
+                        height: .fixed(12)
                     )
                     .foregroundStyle(color(for: .reminder))
-                    .symbolSize(40)
+                    .accessibilityLabel("提醒")
+                    .accessibilityValue("发生于 \(timeText(segment.start))")
                 } else if isShortRest(segment) {
-                    // A 2 minute rest is under two pixels on a 24 hour axis; mark it
-                    // instead of drawing a bar nobody can see. The position is the
-                    // midpoint, so it never claims a duration it did not have.
-                    PointMark(
+                    RectangleMark(
                         x: .value("时间", segment.start.addingTimeInterval(segment.duration / 2)),
-                        y: .value("类型", laneTitle(segment.kind))
+                        y: .value("类型", laneTitle(segment.kind)),
+                        width: .fixed(4),
+                        height: .fixed(12)
                     )
                     .foregroundStyle(color(for: segment.kind))
-                    .symbolSize(70)
+                    .accessibilityLabel(accessibilityTitle(for: segment.kind))
+                    .accessibilityValue(segmentAccessibilityValue(segment))
                 } else {
                     RectangleMark(
                         xStart: .value("开始", segment.start),
                         xEnd: .value("结束", segment.end),
-                        y: .value("类型", laneTitle(segment.kind))
+                        y: .value("类型", laneTitle(segment.kind)),
+                        height: .fixed(12)
                     )
                     .foregroundStyle(color(for: segment.kind))
+                    .accessibilityLabel(accessibilityTitle(for: segment.kind))
+                    .accessibilityValue(segmentAccessibilityValue(segment))
                 }
             }
             if calendar.isDate(now, inSameDayAs: day) {
@@ -165,6 +174,25 @@ struct TodayTimelineView: View {
         case .rest, .restCancelled: return "休息"
         case .reminder: return "提醒"
         }
+    }
+
+    private func accessibilityTitle(for kind: TimelineKind) -> String {
+        switch kind {
+        case .work: return "计时"
+        case .rest: return "休息"
+        case .restCancelled: return "已取消的休息"
+        case .reminder: return "提醒"
+        }
+    }
+
+    private func segmentAccessibilityValue(_ segment: TimelineSegment) -> String {
+        "\(timeText(segment.start)) 至 \(timeText(segment.end))，\(DurationText.compact(seconds: segment.duration))"
+    }
+
+    private func timeText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 
     private func color(for kind: TimelineKind) -> Color {
